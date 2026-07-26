@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.0.0'
-$script:SCRIPT_REVISION = '1'
+$script:SCRIPT_VERSION  = '1.0.1'
+$script:SCRIPT_REVISION = '2'
 $script:SCRIPT_DATE     = '2026-07-26'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -271,24 +271,56 @@ function Test-Command {
     [bool](Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
-# Is an app present? Checks a command name and/or a winget id and/or a display-name match.
+# --- Detection caches -------------------------------------------------------
+# Detection is called dozens of times when the menu opens; without caching that
+# means dozens of slow `winget list` spawns + registry scans (the source of the
+# menu lag). We snapshot both ONCE and reuse. Reset after installs so a later
+# summary re-reads fresh state.
+$script:_WingetListText = $null
+$script:_InstalledNames = $null
+
+function Reset-DetectionCache {
+    $script:_WingetListText = $null
+    $script:_InstalledNames = $null
+}
+
+function Get-WingetListText {
+    if ($null -ne $script:_WingetListText) { return $script:_WingetListText }
+    $script:_WingetListText = ''
+    if (Test-Command 'winget') {
+        try { $script:_WingetListText = (winget list --accept-source-agreements 2>$null | Out-String) } catch { }
+    }
+    return $script:_WingetListText
+}
+
+function Get-InstalledDisplayNames {
+    if ($null -ne $script:_InstalledNames) { return $script:_InstalledNames }
+    $names = New-Object System.Collections.ArrayList
+    foreach ($k in @(
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
+            'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*')) {
+        try {
+            Get-ItemProperty $k -ErrorAction SilentlyContinue |
+                Where-Object { $_.DisplayName } |
+                ForEach-Object { [void]$names.Add([string]$_.DisplayName) }
+        } catch { }
+    }
+    $script:_InstalledNames = $names
+    return $script:_InstalledNames
+}
+
+# Is an app present? Checks a command name and/or a display-name match and/or a winget id.
+# Uses cached registry + winget snapshots so it is cheap to call many times.
 function Test-App {
     param([string]$Command, [string]$WingetId, [string]$DisplayNameLike)
     if ($Command -and (Test-Command $Command)) { return $true }
     if ($DisplayNameLike) {
-        $keys = @(
-            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
-            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
-            'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
-        )
-        foreach ($k in $keys) {
-            if (Get-ItemProperty $k -ErrorAction SilentlyContinue |
-                    Where-Object { $_.DisplayName -like $DisplayNameLike }) { return $true }
-        }
+        foreach ($n in (Get-InstalledDisplayNames)) { if ($n -like $DisplayNameLike) { return $true } }
     }
-    if ($WingetId -and (Test-Command 'winget')) {
-        $out = winget list --id $WingetId -e --accept-source-agreements 2>$null
-        if ($LASTEXITCODE -eq 0 -and ($out -match [regex]::Escape($WingetId))) { return $true }
+    if ($WingetId) {
+        $wl = Get-WingetListText
+        if ($wl -and ($wl -match [regex]::Escape($WingetId))) { return $true }
     }
     return $false
 }
@@ -2407,254 +2439,329 @@ function Invoke-Debloat {
 }
 
 #===============================================================================
-# Interactive TUI menu (arrow keys + space toggle + submenus + status markers)
-# Windows-native equivalent of the source's show_interactive_install_menu.
+# Interactive TUI menu — flicker-free, birebir with the source's arrow-key menu.
+#
+# Performance notes (these were the reported lag/flicker causes):
+#   * We redraw by moving the cursor to (0,0) and OVERWRITING padded lines every
+#     frame — NEVER Clear-Host per keypress. Clear-Host happens only on entry and
+#     when returning from a sub-menu.
+#   * Status markers (installed/applied/removed) are computed ONCE before the loop
+#     (detection hits winget/registry and is slow), never per frame.
 #===============================================================================
 
 # Menu-driven selection state (also consumed by the flag dispatcher)
-$script:SelectedTweaks       = @()
-$script:SelectedDebloat      = @()
-$script:SelectedVSCodeExt    = @()
-$script:VSCodeApplySettings  = $true
-$script:HostnameValue        = $null
+$script:SelectedTweaks      = @()
+$script:SelectedDebloat     = @()
+$script:SelectedVSCodeExt   = @()
+$script:VSCodeApplySettings = $true
+$script:HostnameValue       = $null
+$script:_MainRows           = $null
 
-#-------------------------------------------------------------------------------
-# System info header (mirrors show_system_header)
-#-------------------------------------------------------------------------------
+function Set-MenuCursorVisible { param([bool]$Visible) try { [System.Console]::CursorVisible = $Visible } catch { } }
+
+# Group marker text (mirrors group_marker): "" / "<word>" / "<inst>/<total> <word>"
+function Get-GroupMarkerText {
+    param([int]$Installed, [int]$Total, [string]$Word)
+    if ($Installed -le 0) { return '' }
+    if ($Installed -ge $Total) { return $Word }
+    return "$Installed/$Total $Word"
+}
+
+# Write a single line as colored segments, padded with spaces to the console
+# width so leftover characters from the previous frame are erased (no flicker).
+function Write-PadLine {
+    param([object[]]$Segs)
+    $len = 0
+    foreach ($s in $Segs) {
+        $t = [string]$s.t
+        if ($t.Length -gt 0) {
+            if ($s.c) { Write-Host $t -ForegroundColor $s.c -NoNewline } else { Write-Host $t -NoNewline }
+            $len += $t.Length
+        }
+    }
+    $w = 80; try { $w = [System.Console]::WindowWidth } catch { }
+    $pad = $w - 1 - $len
+    if ($pad -gt 0) { Write-Host (' ' * $pad) -NoNewline }
+    Write-Host ''
+}
+
+# Print the system header (used by non-menu screens like backup/restore).
 function Show-SystemHeader {
+    Write-Host ''
+    foreach ($h in (Get-HeaderLines)) { Write-Host $h.t -ForegroundColor $h.c }
+    Write-Host ''
+}
+
+# Precompute the system header lines once (Get-CimInstance is slow).
+function Get-HeaderLines {
     $os = $null
-    try { $os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue } catch {}
+    try { $os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue } catch { }
     $edition = if ($os) { $os.Caption } else { 'Windows' }
     $build   = if ($os) { $os.Version } else { '' }
-    Write-Host ""
-    Write-Host "  ============================================================" -ForegroundColor Cyan
-    Write-Host "   Windows Post-Installation Setup  v$($script:SCRIPT_VERSION)" -ForegroundColor Cyan
-    Write-Host "  ============================================================" -ForegroundColor Cyan
-    Write-Host ("   OS   : {0} (build {1})" -f $edition, $build) -ForegroundColor DarkGray
-    Write-Host ("   Host : {0}    User: {1}" -f $env:COMPUTERNAME, $env:USERNAME) -ForegroundColor DarkGray
-    Write-Host ""
+    return @(
+        @{ t = ("   Windows Post-Installation Setup  v{0}" -f $script:SCRIPT_VERSION); c = 'Cyan' },
+        @{ t = ("   {0}  (build {1})" -f $edition, $build); c = 'DarkGray' },
+        @{ t = ("   Host: {0}    User: {1}" -f $env:COMPUTERNAME, $env:USERNAME); c = 'DarkGray' }
+    )
 }
 
 #-------------------------------------------------------------------------------
-# Compute the status marker for a catalog item.
-#   Type: 'install' | 'remote' | 'tweak' | 'debloat'
+# Generic flicker-free arrow-key menu engine (used by the main menu and every
+# sub-menu). Mutates each row's .Selected. Returns 'confirm' or 'quit'.
+#   Row fields: Num, Label, Desc, Marker, Selected, IsGroup, OnEnter,
+#               SelectedCheck (optional scriptblock -> bool for derived rows)
 #-------------------------------------------------------------------------------
-function Get-ItemStatus {
-    param([hashtable]$Item, [string]$Type)
+function Invoke-SelectMenu {
+    param(
+        [object[]]$Header = @(),
+        [string]$Banner = '',
+        [System.Collections.ArrayList]$Rows,
+        [scriptblock]$Summary,
+        [scriptblock]$OnSelectAll,
+        [scriptblock]$OnSelectNone
+    )
+    $cursor = 0
+    $needClear = $false
+    Set-MenuCursorVisible $false
+    Clear-Host
     try {
-        switch ($Type) {
-            'install' { if ($Item.Detect -and (& $Item.Detect)) { return 'installed' } }
-            'remote'  {
-                if ($Item.Detect -and (& $Item.Detect)) {
-                    if (Test-RemoteUpdateAvailable -Key $Item.Key) { return 'update available' }
-                    return 'installed'
+        while ($true) {
+            # In-place redraw when the frame fits the window (no flicker); otherwise
+            # fall back to Clear-Host each frame (correct, some flicker on tall lists).
+            $fh = $Header.Count + 4 + $Rows.Count + 3
+            $wh = 25; try { $wh = [System.Console]::WindowHeight } catch { }
+            $inPlace = ($fh -lt $wh)
+            if ($needClear -or -not $inPlace) { Clear-Host; $needClear = $false }
+            if ($inPlace) { try { [System.Console]::SetCursorPosition(0, 0) } catch { Clear-Host } }
+
+            foreach ($h in $Header) { Write-PadLine @($h) }
+            Write-PadLine @(@{ t = '  ==============================================================='; c = 'Green' })
+            Write-PadLine @(@{ t = ("   {0}" -f $Banner); c = 'Green' })
+            Write-PadLine @(@{ t = '  ==============================================================='; c = 'Green' })
+            Write-PadLine @(@{ t = '' })
+
+            for ($i = 0; $i -lt $Rows.Count; $i++) {
+                $r = $Rows[$i]
+                $sel = if ($r.SelectedCheck) { [bool](& $r.SelectedCheck) } else { [bool]$r.Selected }
+                $segs = @()
+                if ($i -eq $cursor) { $segs += @{ t = ' > '; c = 'Cyan' } } else { $segs += @{ t = '   ' } }
+                $segs += @{ t = ('[{0,2}] ' -f $r.Num); c = 'Blue' }
+                if ($r.IsGroup) {
+                    $segs += @{ t = $(if ($sel) { '[+] ' } else { '[ ] ' }); c = $(if ($sel) { 'Green' } else { 'DarkGray' }) }
+                } else {
+                    $segs += @{ t = $(if ($sel) { '[x] ' } else { '[ ] ' }); c = $(if ($sel) { 'Green' } else { 'Gray' }) }
                 }
+                $segs += @{ t = $r.Label; c = $(if ($sel) { 'Green' } else { 'White' }) }
+                if ($r.Desc)   { $segs += @{ t = (' - ' + $r.Desc); c = 'DarkGray' } }
+                if ($r.Marker) { $segs += @{ t = ('  **' + $r.Marker); c = 'Yellow' } }
+                Write-PadLine $segs
             }
-            'tweak'   { if (Test-TweakApplied -Key $Item.Key) { return 'applied' } }
-            'debloat' { if (Test-BloatRemoved -Item $Item) { return 'removed' } }
-        }
-    } catch { }
-    return ''
-}
 
-#-------------------------------------------------------------------------------
-# Generic arrow-key checkbox menu (used by submenus). Mutates $Items[i].Selected.
-# Returns $true on save (c/Esc), $false on discard (q).
-#-------------------------------------------------------------------------------
-function Show-CheckboxMenu {
-    param([string]$Title, [array]$Items)
-    $idx = 0
-    if ($Items.Count -eq 0) { return $true }
-    while ($true) {
-        Clear-Host
-        Write-Host ""
-        Write-Host "  $Title" -ForegroundColor Cyan
-        Write-Host "  $('=' * 58)" -ForegroundColor Cyan
-        for ($i = 0; $i -lt $Items.Count; $i++) {
-            $it = $Items[$i]
-            $box    = if ($it.Selected) { '[x]' } else { '[ ]' }
-            $prefix = if ($i -eq $idx)  { '>'   } else { ' '   }
-            $status = if ($it.Status)   { "  ($($it.Status))" } else { '' }
-            $fg     = if ($i -eq $idx)  { 'Yellow' } else { 'Gray' }
-            Write-Host ("  {0} {1} {2}{3}" -f $prefix, $box, $it.Label, $status) -ForegroundColor $fg
-        }
-        Write-Host "  $('=' * 58)" -ForegroundColor Cyan
-        Write-Host "  UP/DOWN move | SPACE toggle | a all | n none | c save | q back" -ForegroundColor DarkGray
+            Write-PadLine @(@{ t = '  ---------------------------------------------------------------'; c = 'Yellow' })
+            if ($Summary) { Write-PadLine @(@{ t = ('  ' + (& $Summary)); c = 'Green' }) } else { Write-PadLine @(@{ t = '' }) }
+            Write-PadLine @(@{ t = '   UP/DN move  SPACE toggle  ENTER sub-menu  a all  n none  c confirm  q quit'; c = 'DarkGray' })
 
-        $k = [System.Console]::ReadKey($true)
-        if     ($k.Key -eq 'UpArrow')   { $idx = ($idx - 1 + $Items.Count) % $Items.Count }
-        elseif ($k.Key -eq 'DownArrow') { $idx = ($idx + 1) % $Items.Count }
-        elseif ($k.Key -eq 'Spacebar' -or $k.Key -eq 'Enter') { $Items[$idx].Selected = -not $Items[$idx].Selected }
-        elseif ($k.Key -eq 'Escape')    { return $true }
-        else {
-            switch ([char]::ToLower([char]$k.KeyChar)) {
-                'a' { foreach ($it in $Items) { $it.Selected = $true } }
-                'n' { foreach ($it in $Items) { $it.Selected = $false } }
-                'c' { return $true }
-                'q' { return $false }
+            $k   = [System.Console]::ReadKey($true)
+            $key = $k.Key
+            $ch  = [char]::ToLower([char]$k.KeyChar)
+
+            if ($key -eq 'UpArrow'   -or $ch -eq 'k') { if ($cursor -gt 0) { $cursor-- } }
+            elseif ($key -eq 'DownArrow' -or $ch -eq 'j') { if ($cursor -lt $Rows.Count - 1) { $cursor++ } }
+            elseif ($key -eq 'Spacebar' -or $key -eq 'Enter') {
+                $r = $Rows[$cursor]
+                if ($r.OnEnter) { & $r.OnEnter; $needClear = $true } else { $r.Selected = -not $r.Selected }
             }
+            elseif ($ch -eq 'a') { foreach ($r in $Rows) { if (-not $r.IsGroup) { $r.Selected = $true } }; if ($OnSelectAll) { & $OnSelectAll } }
+            elseif ($ch -eq 'n') { foreach ($r in $Rows) { if (-not $r.IsGroup) { $r.Selected = $false } }; if ($OnSelectNone) { & $OnSelectNone } }
+            elseif ($ch -eq 'c') { return 'confirm' }
+            elseif ($ch -eq 'q' -or $key -eq 'Escape') { return 'quit' }
         }
+    } finally {
+        Set-MenuCursorVisible $true
     }
 }
 
 #-------------------------------------------------------------------------------
-# Submenus — each builds rows from a catalog group, runs Show-CheckboxMenu, and
-# writes the result back to $flags / $script:Selected* on save.
+# Sub-menus — each precomputes markers once, runs the engine, writes back on confirm.
 #-------------------------------------------------------------------------------
-function Show-AiCliSubmenu {
-    $rows = @()
-    foreach ($t in $script:AiCliTools) {
-        $rows += @{ Label=$t.Label; Selected=[bool]$flags[$t.Flag]; Status=(Get-ItemStatus $t 'install'); Ref=$t }
+function Show-RemoteSubmenu {
+    $rows = New-Object System.Collections.ArrayList
+    $n = 0
+    foreach ($t in $script:RemoteTools) {
+        $n++
+        $mk = ''
+        if (& $t.Detect) { $mk = if (Test-RemoteUpdateAvailable -Key $t.Key) { 'update available' } else { 'installed' } }
+        [void]$rows.Add(@{ Num = $n; Label = $t.Label; Desc = ''; Marker = $mk; Selected = [bool]$flags[$t.Flag]; IsGroup = $false; OnEnter = $null; Ref = $t })
     }
-    if (Show-CheckboxMenu -Title 'AI CLI Tools' -Items $rows) {
+    if ((Invoke-SelectMenu -Banner 'Remote Support Tools' -Rows $rows) -eq 'confirm') {
         foreach ($r in $rows) { $flags[$r.Ref.Flag] = [bool]$r.Selected }
     }
 }
 
-function Show-RemoteSubmenu {
-    $rows = @()
-    foreach ($t in $script:RemoteTools) {
-        $rows += @{ Label=$t.Label; Selected=[bool]$flags[$t.Flag]; Status=(Get-ItemStatus $t 'remote'); Ref=$t }
+function Show-AiCliSubmenu {
+    $rows = New-Object System.Collections.ArrayList
+    $n = 0
+    foreach ($t in $script:AiCliTools) {
+        $n++
+        $mk = ''; if (& $t.Detect) { $mk = 'installed' }
+        [void]$rows.Add(@{ Num = $n; Label = $t.Label; Desc = ''; Marker = $mk; Selected = [bool]$flags[$t.Flag]; IsGroup = $false; OnEnter = $null; Ref = $t })
     }
-    if (Show-CheckboxMenu -Title 'Remote Support Tools' -Items $rows) {
+    if ((Invoke-SelectMenu -Banner 'AI CLI Tools' -Rows $rows) -eq 'confirm') {
         foreach ($r in $rows) { $flags[$r.Ref.Flag] = [bool]$r.Selected }
     }
 }
 
 function Show-TweaksSubmenu {
-    $rows = @()
+    $rows = New-Object System.Collections.ArrayList
+    $n = 0
     foreach ($t in $script:WindowsTweaks) {
-        $rows += @{ Label=$t.Label; Selected=($script:SelectedTweaks -contains $t.Key); Status=(Get-ItemStatus $t 'tweak'); Ref=$t }
+        $n++
+        $mk = ''; if (Test-TweakApplied -Key $t.Key) { $mk = 'applied' }
+        [void]$rows.Add(@{ Num = $n; Label = $t.Label; Desc = ''; Marker = $mk; Selected = ($script:SelectedTweaks -contains $t.Key); IsGroup = $false; OnEnter = $null; Ref = $t })
     }
-    if (Show-CheckboxMenu -Title 'Windows Tweaks' -Items $rows) {
+    if ((Invoke-SelectMenu -Banner 'Windows Tweaks' -Rows $rows) -eq 'confirm') {
         $script:SelectedTweaks = @($rows | Where-Object { $_.Selected } | ForEach-Object { $_.Ref.Key })
         if ($script:SelectedTweaks.Count -gt 0) { $flags.Tweaks = $true }
-        # collect hostname up-front if the hostname tweak was picked
-        if ($script:SelectedTweaks -contains 'hostname') {
-            $script:HostnameValue = Read-Host "  Enter the new computer hostname"
+        if (($script:SelectedTweaks -contains 'hostname') -and -not $script:HostnameValue) {
+            Set-MenuCursorVisible $true
+            $script:HostnameValue = Read-Host "`n  Enter the new computer hostname"
         }
     }
 }
 
 function Show-DebloatSubmenu {
-    $rows = @()
+    $rows = New-Object System.Collections.ArrayList
+    $n = 0
     foreach ($t in $script:DebloatItems) {
-        $rows += @{ Label=$t.Label; Selected=($script:SelectedDebloat -contains $t.Key); Status=(Get-ItemStatus $t 'debloat'); Ref=$t }
+        $n++
+        $mk = ''; if (Test-BloatRemoved -Item $t) { $mk = 'removed' }
+        [void]$rows.Add(@{ Num = $n; Label = $t.Label; Desc = ''; Marker = $mk; Selected = ($script:SelectedDebloat -contains $t.Key); IsGroup = $false; OnEnter = $null; Ref = $t })
     }
-    if (Show-CheckboxMenu -Title 'Debloat (remove pre-installed apps)' -Items $rows) {
+    if ((Invoke-SelectMenu -Banner 'Debloat (remove pre-installed apps)' -Rows $rows) -eq 'confirm') {
         $script:SelectedDebloat = @($rows | Where-Object { $_.Selected } | ForEach-Object { $_.Ref.Key })
         if ($script:SelectedDebloat.Count -gt 0) { $flags.Debloat = $true }
     }
 }
 
 function Show-VSCodeSubmenu {
-    $rows = @()
-    $rows += @{ Label='Install Visual Studio Code'; Selected=[bool]$flags.VSCode; Kind='install' }
-    $rows += @{ Label='Apply recommended settings'; Selected=[bool]$script:VSCodeApplySettings; Kind='settings' }
+    $rows = New-Object System.Collections.ArrayList
+    [void]$rows.Add(@{ Num = 1; Label = 'Install Visual Studio Code'; Desc = ''; Marker = $(if (Test-VSCodeInstalled) { 'installed' } else { '' }); Selected = [bool]$flags.VSCode; IsGroup = $false; OnEnter = $null; Kind = 'install' })
+    [void]$rows.Add(@{ Num = 2; Label = 'Apply recommended settings'; Desc = ''; Marker = ''; Selected = [bool]$script:VSCodeApplySettings; IsGroup = $false; OnEnter = $null; Kind = 'settings' })
+    $n = 2
     foreach ($e in $script:VSCodeExtensions) {
-        $rows += @{ Label=("Extension: {0}" -f $e.Label); Selected=($script:SelectedVSCodeExt -contains $e.Id); Kind='ext'; Ref=$e }
+        $n++
+        [void]$rows.Add(@{ Num = $n; Label = ("Extension: {0}" -f $e.Label); Desc = ''; Marker = ''; Selected = ($script:SelectedVSCodeExt -contains $e.Id); IsGroup = $false; OnEnter = $null; Kind = 'ext'; Ref = $e })
     }
-    if (Show-CheckboxMenu -Title 'Visual Studio Code' -Items $rows) {
-        $flags.VSCode = [bool]($rows | Where-Object { $_.Kind -eq 'install' }).Selected
-        $script:VSCodeApplySettings = [bool]($rows | Where-Object { $_.Kind -eq 'settings' }).Selected
-        $script:SelectedVSCodeExt = @($rows | Where-Object { $_.Kind -eq 'ext' -and $_.Selected } | ForEach-Object { $_.Ref.Id })
-        if ($script:SelectedVSCodeExt.Count -gt 0 -or $script:VSCodeApplySettings) { $flags.VSCode = $true }
+    if ((Invoke-SelectMenu -Banner 'Visual Studio Code' -Rows $rows) -eq 'confirm') {
+        $script:VSCodeApplySettings = [bool]($rows | Where-Object { $_.Kind -eq 'settings' } | Select-Object -First 1).Selected
+        $script:SelectedVSCodeExt   = @($rows | Where-Object { $_.Kind -eq 'ext' -and $_.Selected } | ForEach-Object { $_.Ref.Id })
+        $installSel = [bool]($rows | Where-Object { $_.Kind -eq 'install' } | Select-Object -First 1).Selected
+        if ($installSel -or $script:SelectedVSCodeExt.Count -gt 0 -or $script:VSCodeApplySettings) { $flags.VSCode = $true }
     }
 }
 
 #-------------------------------------------------------------------------------
-# Aggregate marker for a submenu group row (mirrors group_marker: "", "N selected")
-#-------------------------------------------------------------------------------
-function Get-GroupMarker {
-    param([string]$Sub)
-    $n = 0
-    switch ($Sub) {
-        'aicli'   { $n = @($script:AiCliTools  | Where-Object { $flags[$_.Flag] }).Count }
-        'remote'  { $n = @($script:RemoteTools | Where-Object { $flags[$_.Flag] }).Count }
-        'tweaks'  { $n = $script:SelectedTweaks.Count }
-        'debloat' { $n = $script:SelectedDebloat.Count }
-        'vscode'  { $n = $script:SelectedVSCodeExt.Count + ([int][bool]$flags.VSCode) }
-    }
-    if ($n -gt 0) { return "$n selected" }
-    return ''
-}
-
-#-------------------------------------------------------------------------------
-# Main interactive menu
+# Main interactive menu (birebir: one flat numbered list, groups expand on ENTER)
 #-------------------------------------------------------------------------------
 function Show-InteractiveMenu {
-    # Build rows: dev tools (toggle or submenu) + the four group submenus
+    Reset-DetectionCache
+    Write-Host ""
+    Write-Host "  Scanning installed software..." -ForegroundColor DarkGray
+
+    $dev = @{}
+    foreach ($d in $script:DevTools) { $dev[$d.Key] = $d }
+
+    # Precompute group markers ONCE (detection is slow)
+    $rmInst = @($script:RemoteTools  | Where-Object { & $_.Detect }).Count
+    $aiInst = @($script:AiCliTools   | Where-Object { & $_.Detect }).Count
+    $twInst = @($script:WindowsTweaks| Where-Object { Test-TweakApplied -Key $_.Key }).Count
+    $dbInst = @($script:DebloatItems | Where-Object { Test-BloatRemoved -Item $_ }).Count
+    $vsInst = if (Test-VSCodeInstalled) { 'installed' } else { '' }
+
+    # Birebir order + descriptions
+    $order = @(
+        @{ k='remote';      group='remote';  label='Remote Support Tools'; desc='RealVNC, AnyDesk, RustDesk, TeamViewer (Enter to expand)'; marker=(Get-GroupMarkerText $rmInst $script:RemoteTools.Count 'installed') }
+        @{ k='nodejs';                        label='NodeJS';       desc='nvm-windows + Node.js 22 + Yarn' }
+        @{ k='chrome';                        label='Chrome';       desc='Google Chrome' }
+        @{ k='vscode';      group='vscode';  label='VS Code';      desc='Visual Studio Code (Enter: extensions & settings)'; marker=$vsInst }
+        @{ k='python';                        label='Python';       desc='Python 3' }
+        @{ k='tweaks';      group='tweaks';  label='Tweaks';       desc='Windows tweaks (Enter to expand)'; marker=(Get-GroupMarkerText $twInst $script:WindowsTweaks.Count 'applied') }
+        @{ k='dbeaver';                       label='DBeaver';      desc='DBeaver CE (database tool)' }
+        @{ k='vlc';                           label='VLC';          desc='VLC Media Player' }
+        @{ k='cloudflared';                   label='Cloudflared';  desc='Cloudflare Tunnel client' }
+        @{ k='docker';                        label='Docker';       desc='Docker Desktop' }
+        @{ k='aicli';       group='aicli';   label='AI CLI Tools'; desc='Claude, Codex, Kimi, Grok, Gemini, Qwen, GLM (Enter to expand)'; marker=(Get-GroupMarkerText $aiInst $script:AiCliTools.Count 'installed') }
+        @{ k='gh';                            label='GitHub CLI';   desc='GitHub CLI (gh)' }
+        @{ k='postman';                       label='Postman';      desc='Postman (API testing)' }
+        @{ k='filezilla';                     label='FileZilla';    desc='FileZilla (FTP/SFTP)' }
+        @{ k='debloat';     group='debloat'; label='Debloat';      desc='Remove pre-installed apps (Enter to expand)'; marker=(Get-GroupMarkerText $dbInst $script:DebloatItems.Count 'removed') }
+    )
+
     $rows = New-Object System.Collections.ArrayList
-    foreach ($d in $script:DevTools) {
-        if ($d.SubMenu) {
-            [void]$rows.Add(@{ Label=$d.Label; Type='submenu'; Sub=$d.SubMenu })
+    $n = 0
+    foreach ($o in $order) {
+        $n++
+        if ($o.group) {
+            $g = $o.group
+            $onEnter = switch ($g) {
+                'remote'  { { Show-RemoteSubmenu } }
+                'vscode'  { { Show-VSCodeSubmenu } }
+                'tweaks'  { { Show-TweaksSubmenu } }
+                'aicli'   { { Show-AiCliSubmenu } }
+                'debloat' { { Show-DebloatSubmenu } }
+            }
+            $check = switch ($g) {
+                'remote'  { { @($script:RemoteTools | Where-Object { $flags[$_.Flag] }).Count -gt 0 } }
+                'vscode'  { { [bool]$flags.VSCode -or $script:SelectedVSCodeExt.Count -gt 0 } }
+                'tweaks'  { { $script:SelectedTweaks.Count -gt 0 } }
+                'aicli'   { { @($script:AiCliTools | Where-Object { $flags[$_.Flag] }).Count -gt 0 } }
+                'debloat' { { $script:SelectedDebloat.Count -gt 0 } }
+            }
+            [void]$rows.Add(@{ Num=$n; Label=$o.label; Desc=$o.desc; Marker=$o.marker; IsGroup=$true; OnEnter=$onEnter; SelectedCheck=$check })
         } else {
-            [void]$rows.Add(@{ Label=$d.Label; Type='toggle'; Ref=$d; Selected=$false })
+            $d = $dev[$o.k]
+            $mk = ''; if (& $d.Detect) { $mk = 'installed' }
+            [void]$rows.Add(@{ Num=$n; Label=$o.label; Desc=$o.desc; Marker=$mk; IsGroup=$false; OnEnter=$null; Selected=$false; Ref=$d })
         }
     }
-    [void]$rows.Add(@{ Label='AI CLI Tools';         Type='submenu'; Sub='aicli' })
-    [void]$rows.Add(@{ Label='Remote Support Tools'; Type='submenu'; Sub='remote' })
-    [void]$rows.Add(@{ Label='Windows Tweaks';       Type='submenu'; Sub='tweaks' })
-    [void]$rows.Add(@{ Label='Debloat';              Type='submenu'; Sub='debloat' })
+    $script:_MainRows = $rows
 
-    $idx = 0
-    while ($true) {
-        Clear-Host
-        Show-SystemHeader
-        Write-Host "  Select what to install/apply, then press 'c' to continue." -ForegroundColor White
-        Write-Host "  $('=' * 58)" -ForegroundColor Cyan
-        for ($i = 0; $i -lt $rows.Count; $i++) {
-            $r = $rows[$i]
-            $prefix = if ($i -eq $idx) { '>' } else { ' ' }
-            $fg     = if ($i -eq $idx) { 'Yellow' } else { 'Gray' }
-            if ($r.Type -eq 'submenu') {
-                $marker = Get-GroupMarker $r.Sub
-                $status = if ($marker) { "  ($marker)" } else { '' }
-                Write-Host ("  {0}  >> {1}{2}" -f $prefix, $r.Label, $status) -ForegroundColor $fg
-            } else {
-                $box    = if ($r.Selected) { '[x]' } else { '[ ]' }
-                $st     = Get-ItemStatus $r.Ref 'install'
-                $status = if ($st) { "  ($st)" } else { '' }
-                Write-Host ("  {0} {1} {2}{3}" -f $prefix, $box, $r.Label, $status) -ForegroundColor $fg
-            }
-        }
-        Write-Host "  $('=' * 58)" -ForegroundColor Cyan
-        Write-Host "  UP/DOWN move | SPACE toggle | ENTER open group | a all | n none | c continue | q quit" -ForegroundColor DarkGray
-
-        $k = [System.Console]::ReadKey($true)
-        if ($k.Key -eq 'UpArrow')   { $idx = ($idx - 1 + $rows.Count) % $rows.Count; continue }
-        if ($k.Key -eq 'DownArrow') { $idx = ($idx + 1) % $rows.Count; continue }
-        if ($k.Key -eq 'Enter' -or $k.Key -eq 'Spacebar') {
-            $r = $rows[$idx]
-            if ($r.Type -eq 'submenu') {
-                switch ($r.Sub) {
-                    'vscode'  { Show-VSCodeSubmenu }
-                    'aicli'   { Show-AiCliSubmenu }
-                    'remote'  { Show-RemoteSubmenu }
-                    'tweaks'  { Show-TweaksSubmenu }
-                    'debloat' { Show-DebloatSubmenu }
-                }
-            } else {
-                $r.Selected = -not $r.Selected
-            }
-            continue
-        }
-        if ($k.Key -eq 'Escape') { break }
-        switch ([char]::ToLower([char]$k.KeyChar)) {
-            'a' { foreach ($r in $rows) { if ($r.Type -eq 'toggle') { $r.Selected = $true } } }
-            'n' { foreach ($r in $rows) { if ($r.Type -eq 'toggle') { $r.Selected = $false } } }
-            'c' { break }
-            'q' { Write-LogInfo "Selection discarded. Nothing was changed."; return }
-        }
-        if ([char]::ToLower([char]$k.KeyChar) -eq 'c' -or [char]::ToLower([char]$k.KeyChar) -eq 'q') { break }
+    $summary = {
+        $parts = @()
+        foreach ($row in $script:_MainRows) { if (-not $row.IsGroup -and $row.Selected) { $parts += $row.Label } }
+        $rm = @($script:RemoteTools  | Where-Object { $flags[$_.Flag] } | ForEach-Object { $_.Key });   if ($rm.Count) { $parts += "Remote[$($rm -join ',')]" }
+        $ai = @($script:AiCliTools   | Where-Object { $flags[$_.Flag] } | ForEach-Object { $_.Key });   if ($ai.Count) { $parts += "AI[$($ai -join ',')]" }
+        if ($script:SelectedTweaks.Count)  { $parts += "Tweaks[$($script:SelectedTweaks.Count)]" }
+        if ($script:SelectedDebloat.Count) { $parts += "Debloat[$($script:SelectedDebloat.Count)]" }
+        if ($flags.VSCode) { $parts += 'VSCode' }
+        if ($parts.Count -gt 0) { return "Selected ($($parts.Count)): " + ($parts -join ', ') }
+        return 'Selected: None'
     }
 
-    # Apply toggle selections to $flags
-    foreach ($r in $rows) {
-        if ($r.Type -eq 'toggle' -and $r.Selected) { $flags[$r.Ref.Flag] = $true }
+    $selectAll = {
+        foreach ($t in $script:AiCliTools)  { $flags[$t.Flag] = $true }
+        foreach ($t in $script:RemoteTools) { $flags[$t.Flag] = $true }
+        $script:SelectedTweaks    = @($script:WindowsTweaks | ForEach-Object { $_.Key })
+        $script:SelectedDebloat   = @($script:DebloatItems  | ForEach-Object { $_.Key })
+        $script:SelectedVSCodeExt = @($script:VSCodeExtensions | ForEach-Object { $_.Id })
+        $flags.Tweaks = $true; $flags.Debloat = $true; $flags.VSCode = $true
+    }
+    $selectNone = {
+        foreach ($t in $script:AiCliTools)  { $flags[$t.Flag] = $false }
+        foreach ($t in $script:RemoteTools) { $flags[$t.Flag] = $false }
+        $script:SelectedTweaks = @(); $script:SelectedDebloat = @(); $script:SelectedVSCodeExt = @()
+        $flags.Tweaks = $false; $flags.Debloat = $false; $flags.VSCode = $false
     }
 
+    $result = Invoke-SelectMenu -Header (Get-HeaderLines) -Banner 'Select what to install / apply' `
+        -Rows $rows -Summary $summary -OnSelectAll $selectAll -OnSelectNone $selectNone
+
+    Set-MenuCursorVisible $true
     Clear-Host
+    if ($result -ne 'confirm') { Write-LogInfo "Cancelled. Nothing was changed."; return }
+
+    foreach ($row in $rows) { if (-not $row.IsGroup -and $row.Selected) { $flags[$row.Ref.Flag] = $true } }
+    Reset-DetectionCache
     Invoke-Installations
 }
 
