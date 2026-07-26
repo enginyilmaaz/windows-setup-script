@@ -1,0 +1,6 @@
+# Authoring intermediates (fragments assembled into windows-setup.ps1)
+build/
+# Local tooling
+tools/
+*.output
+.env
