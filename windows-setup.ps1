@@ -6,7 +6,7 @@
     Automates Windows 10/11 post-installation setup with modular options.
     Windows-native counterpart of ubuntu-setup.sh (https://github.com/enginyilmaaz/ubuntu-setup-script).
 .NOTES
-    Version : 1.0.0
+    Version : 1.0.1
     Author  : enginyilmaaz
     License : MIT
 
@@ -19,14 +19,14 @@
 
 #===============================================================================
 # Windows Post-Installation Setup Script
-# Version: 1.0.0
+# Version: 1.0.1
 # Author: enginyilmaaz
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
 $script:SCRIPT_VERSION  = '1.0.1'
 $script:SCRIPT_REVISION = '2'
-$script:SCRIPT_DATE     = '2026-07-26'
+$script:SCRIPT_DATE     = '2026-07-27'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
 $script:SELF_URL = 'https://bit.ly/windows-ey'
