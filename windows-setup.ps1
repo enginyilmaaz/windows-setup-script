@@ -6,7 +6,7 @@
     Automates Windows 10/11 post-installation setup with modular options.
     Windows-native counterpart of ubuntu-setup.sh (https://github.com/enginyilmaaz/ubuntu-setup-script).
 .NOTES
-    Version : 1.0.1
+    Version : 1.1.0
     Author  : enginyilmaaz
     License : MIT
 
@@ -19,17 +19,21 @@
 
 #===============================================================================
 # Windows Post-Installation Setup Script
-# Version: 1.0.1
+# Version: 1.1.0
 # Author: enginyilmaaz
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.0.1'
-$script:SCRIPT_REVISION = '2'
+$script:SCRIPT_VERSION  = '1.1.0'
+$script:SCRIPT_REVISION = '4'
 $script:SCRIPT_DATE     = '2026-07-27'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
 $script:SELF_URL = 'https://bit.ly/windows-ey'
+
+# Gist identity (used by the self-update check)
+$script:GIST_ID   = '5dc585f42032cc2d2736433590555484'
+$script:GIST_FILE = 'windows-setup.ps1'
 
 # Raw args as received (preserved for elevation relaunch)
 $script:RAW_ARGS = @($args)
@@ -63,7 +67,7 @@ $flags = @{
     # windows-native groups (were GNOME tweaks / debloat)
     Tweaks     = $false; Debloat = $false
     # helpers / special commands
-    Login      = $false
+    Login      = $false; SkipUpdate = $false
     ShowBackup = $false; Restore = $false
     ShowHelp   = $false; ShowMenu = $false; ShowVersion = $false
 }
@@ -118,6 +122,8 @@ foreach ($arg in $script:RAW_ARGS) {
         'debloat'     { $flags.Debloat = $true }
         # helpers / special
         'login'       { $flags.Login = $true }
+        'skip-update' { $flags.SkipUpdate = $true }
+        'no-update'   { $flags.SkipUpdate = $true }
         'show-backup' { $flags.ShowBackup = $true }
         'restore'     { $flags.Restore = $true }
         ''            { }  # ignore stray separators
@@ -459,6 +465,7 @@ WINDOWS TWEAKS / DEBLOAT:
 
 HELPERS:
   --login           CLI login helpers
+  --skip-update     Skip the self-update check
   --show-backup     Show current settings backup
   --restore         Restore previous settings
 
@@ -2336,6 +2343,9 @@ function Test-TweakApplied {
 #===============================================================================
 
 $script:DebloatItems = @(
+    # --- Special removals (custom logic; methods taken from the most-starred debloat tools) ---
+    @{ Key='edge';          Label='Microsoft Edge (force uninstall)'; Kind='Script'; Remove='Remove-MicrosoftEdge'; DetectFn='Test-EdgeRemoved' }
+    @{ Key='onedrive';      Label='OneDrive';                  Kind='Script'; Remove='Remove-OneDrive'; DetectFn='Test-OneDriveRemoved' }
     # --- Microsoft Store / UWP bloat (Appx) -----------------------------------
     @{ Key='xbox';          Label='Xbox apps';                 Kind='Appx'; Id='*Xbox*';                          ProvisionedToo=$true }
     @{ Key='gethelp';       Label='Get Help';                  Kind='Appx'; Id='*GetHelp*';                       ProvisionedToo=$true }
@@ -2388,6 +2398,7 @@ function Test-BloatRemoved {
                 if (-not $f) { return $true }
                 return ($f.State -ne 'Enabled')
             }
+            'Script'  { return [bool](& $Item.DetectFn) }
         }
     } catch { return $false }
     return $false
@@ -2414,6 +2425,7 @@ function Remove-BloatItem {
             'Winget'  { if (Test-Winget) { winget uninstall --id $Item.Id -e --silent --accept-source-agreements 2>$null } }
             'DevTool' { if (Test-Winget) { winget uninstall --id $Item.Id -e --silent --accept-source-agreements 2>$null } }
             'Feature' { Disable-WindowsOptionalFeature -Online -FeatureName $Item.Id -NoRestart -ErrorAction SilentlyContinue | Out-Null }
+            'Script'  { & $Item.Remove | Out-Null }
         }
         Write-LogSuccess "Removed: $($Item.Label)"
         return $true
@@ -2436,6 +2448,111 @@ function Invoke-Debloat {
         $item = $script:DebloatItems | Where-Object { $_.Key -eq $key } | Select-Object -First 1
         if ($item) { Remove-BloatItem -Item $item | Out-Null }
     }
+}
+
+#===============================================================================
+# OneDrive removal (canonical method used by the popular debloat tools):
+# kill the client, run the built-in OneDriveSetup /uninstall, drop scheduled
+# tasks, unpin from Explorer, and delete leftover folders.
+#===============================================================================
+function Remove-OneDrive {
+    Write-LogInfo "Removing OneDrive..."
+    try {
+        Get-Process -Name 'OneDrive' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+        $setup = Join-Path $env:SystemRoot 'SysWOW64\OneDriveSetup.exe'
+        if (-not (Test-Path $setup)) { $setup = Join-Path $env:SystemRoot 'System32\OneDriveSetup.exe' }
+        if (Test-Path $setup) {
+            Start-Process -FilePath $setup -ArgumentList '/uninstall' -Wait -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+        }
+        try { Get-ScheduledTask -TaskName '*OneDrive*' -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue } catch { }
+        # Unpin from the File Explorer sidebar (64-bit + 32-bit views)
+        reg add "HKCR\CLSID\{018D5C66-4533-4307-9B53-224DE2ED1FE6}" /v System.IsPinnedToNameSpaceTree /t REG_DWORD /d 0 /f 2>&1 | Out-Null
+        reg add "HKCR\Wow6432Node\CLSID\{018D5C66-4533-4307-9B53-224DE2ED1FE6}" /v System.IsPinnedToNameSpaceTree /t REG_DWORD /d 0 /f 2>&1 | Out-Null
+        foreach ($p in @("$env:USERPROFILE\OneDrive", "$env:LOCALAPPDATA\Microsoft\OneDrive", "$env:PROGRAMDATA\Microsoft OneDrive", "$env:SystemDrive\OneDriveTemp")) {
+            if ($p -and (Test-Path $p)) { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+        return $true
+    } catch {
+        Write-LogWarning "OneDrive removal issue: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+function Test-OneDriveRemoved {
+    return (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'Microsoft\OneDrive\OneDrive.exe')))
+}
+
+#===============================================================================
+# Microsoft Edge force-uninstall.
+# Method from the most-starred debloat tools (Raphire/Win11Debloat + AveYo):
+# unblock via EdgeUpdateDev\AllowUninstall, then run the registered
+# UninstallString with --force-uninstall (fall back to the Application setup.exe).
+# WARNING: Edge is protected; this can affect WebView-dependent apps and Windows
+# may reinstall it. It is opt-in from the Debloat sub-menu.
+#===============================================================================
+function Remove-MicrosoftEdge {
+    Write-LogWarning "Force-removing Microsoft Edge (may affect WebView-based apps; Windows can reinstall it)."
+    try {
+        try {
+            New-Item -Path 'HKLM:\SOFTWARE\Microsoft\EdgeUpdateDev' -Force -ErrorAction SilentlyContinue | Out-Null
+            New-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\EdgeUpdateDev' -Name 'AllowUninstall' -Value '' -PropertyType String -Force -ErrorAction SilentlyContinue | Out-Null
+        } catch { }
+        foreach ($proc in @('msedge', 'msedgewebview2', 'MicrosoftEdgeUpdate', 'WebViewHost')) {
+            Get-Process -Name $proc -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        }
+        $done = $false
+        foreach ($hive in @(
+                'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft Edge',
+                'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft Edge')) {
+            $us = (Get-ItemProperty -Path $hive -ErrorAction SilentlyContinue).UninstallString
+            if ($us) {
+                $exe = $null; $rest = ''
+                if     ($us -match '^"([^"]+)"\s*(.*)$') { $exe = $matches[1]; $rest = $matches[2] }
+                elseif ($us -match '^(\S+)\s*(.*)$')     { $exe = $matches[1]; $rest = $matches[2] }
+                if ($exe -and (Test-Path $exe)) {
+                    if ($rest -notmatch '--force-uninstall') { $rest = ($rest + ' --force-uninstall').Trim() }
+                    Start-Process -FilePath $exe -ArgumentList $rest -Wait -ErrorAction SilentlyContinue
+                    $done = $true; break
+                }
+            }
+        }
+        if (-not $done) {
+            foreach ($root in @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application", "$env:ProgramFiles\Microsoft\Edge\Application")) {
+                if (Test-Path $root) {
+                    $setup = Get-ChildItem -Path $root -Recurse -Filter 'setup.exe' -ErrorAction SilentlyContinue |
+                             Where-Object { $_.FullName -like '*\Installer\setup.exe' } | Select-Object -First 1
+                    if ($setup) {
+                        Start-Process -FilePath $setup.FullName -ArgumentList '--uninstall --system-level --verbose-logging --force-uninstall' -Wait -ErrorAction SilentlyContinue
+                        $done = $true; break
+                    }
+                }
+            }
+        }
+        Remove-Item -LiteralPath "$env:PUBLIC\Desktop\Microsoft Edge.lnk" -Force -ErrorAction SilentlyContinue
+        $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+        $ri = Get-Item -Path $run -ErrorAction SilentlyContinue
+        if ($ri) {
+            foreach ($name in $ri.Property) {
+                if ($name -like 'MicrosoftEdgeAutoLaunch*' -or $name -eq 'Microsoft Edge Update') {
+                    Remove-ItemProperty -Path $run -Name $name -ErrorAction SilentlyContinue
+                }
+            }
+        }
+        if ($done) { return $true }
+        Write-LogWarning "Could not locate the Edge uninstaller."
+        return $false
+    } catch {
+        Write-LogWarning "Edge removal issue: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+function Test-EdgeRemoved {
+    $p1 = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
+    $p2 = "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+    return ((-not (Test-Path $p1)) -and (-not (Test-Path $p2)))
 }
 
 #===============================================================================
@@ -2897,12 +3014,75 @@ function Invoke-CliLogins {
     if (Test-Command 'codex')  { Write-LogInfo "Run 'codex' once to sign in to Codex." }
 }
 
+#-------------------------------------------------------------------------------
+# Self-update check (mirrors check_for_update): compare local SCRIPT_REVISION with
+# the latest revision in the Gist; on a newer rev, offer to download + re-launch.
+# Skipped for git checkouts, with --skip-update, or when SKIP_UPDATE_CHECK=1.
+#-------------------------------------------------------------------------------
+function Invoke-UpdateCheck {
+    if ($flags.SkipUpdate) { return }
+    if ($env:SKIP_UPDATE_CHECK -eq '1') { return }
+    if ($PSCommandPath -and (Test-Path -LiteralPath $PSCommandPath)) {
+        $dir = Split-Path -Parent $PSCommandPath
+        if ($dir -and (Test-Path (Join-Path $dir '.git'))) { return }
+    }
+
+    Write-Host "Checking for script updates..." -ForegroundColor Cyan
+    $localRev = 0; [int]::TryParse([string]$script:SCRIPT_REVISION, [ref]$localRev) | Out-Null
+
+    $remoteContent = $null
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
+        $bust = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        $api  = Invoke-RestMethod -Uri ("https://api.github.com/gists/{0}?_={1}" -f $script:GIST_ID, $bust) `
+                    -Headers @{ 'Cache-Control' = 'no-cache'; 'Accept' = 'application/vnd.github+json'; 'User-Agent' = 'windows-setup' } `
+                    -TimeoutSec 10
+        $rawUrl = $api.files.($script:GIST_FILE).raw_url
+        if ($rawUrl) {
+            $remoteContent = Invoke-RestMethod -Uri $rawUrl -Headers @{ 'Cache-Control' = 'no-cache'; 'User-Agent' = 'windows-setup' } -TimeoutSec 30
+            if ($remoteContent -is [array]) { $remoteContent = $remoteContent -join "`n" }
+        }
+    } catch {
+        Write-Host "Could not reach the gist, continuing with rev-$localRev" -ForegroundColor Yellow
+        return
+    }
+    if (-not $remoteContent) { Write-Host "Could not fetch latest, continuing with rev-$localRev" -ForegroundColor Yellow; return }
+
+    $m = [regex]::Match([string]$remoteContent, "SCRIPT_REVISION\s*=\s*'?(\d+)'?")
+    if (-not $m.Success) { Write-Host "Could not detect remote revision, continuing with rev-$localRev" -ForegroundColor Yellow; return }
+    $remoteRev = [int]$m.Groups[1].Value
+
+    if ($remoteRev -le $localRev) { Write-Host "You're on the latest rev-$localRev" -ForegroundColor Green; return }
+
+    Write-Host ""
+    Write-Host "  ============================================================" -ForegroundColor Yellow
+    Write-Host ("   Update available: rev-{0} -> rev-{1}" -f $localRev, $remoteRev) -ForegroundColor Yellow
+    Write-Host "  ============================================================" -ForegroundColor Yellow
+    Write-Host ""
+    $ans = Read-Host "Download and run the latest version now? (y/n)"
+    if ($ans -notmatch '^[Yy]') { Write-Host "Continuing with rev-$localRev" -ForegroundColor Yellow; return }
+
+    $tmp = Join-Path $env:TEMP ("windows-setup-rev{0}.ps1" -f $remoteRev)
+    try { Set-Content -Path $tmp -Value $remoteContent -Encoding UTF8 -ErrorAction Stop } catch { Write-Host "Failed to save the new script, continuing with rev-$localRev" -ForegroundColor Red; return }
+    if (-not (Test-Path $tmp)) { Write-Host "Failed to save the new script, continuing with rev-$localRev" -ForegroundColor Red; return }
+
+    $env:SKIP_UPDATE_CHECK = '1'
+    Write-Host "Re-launching with rev-$remoteRev..." -ForegroundColor Green
+    Write-Host ""
+    $ps = Get-PowerShellPath
+    & $ps -NoProfile -ExecutionPolicy Bypass -File $tmp @($script:RAW_ARGS)
+    exit $LASTEXITCODE
+}
+
 #===============================================================================
 # main
 #===============================================================================
 function main {
     if ($flags.ShowHelp)    { Show-Help;    return }
     if ($flags.ShowVersion) { Show-Version; return }
+
+    # Self-update check (before elevation; skipped for git checkouts / --skip-update)
+    Invoke-UpdateCheck
 
     # Everything below needs administrator rights.
     Invoke-Elevation

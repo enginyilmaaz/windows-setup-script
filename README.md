@@ -4,7 +4,7 @@ A comprehensive, modular PowerShell script that automates Windows 10/11 post-ins
 
 The Windows-native counterpart of the [Ubuntu Post-Installation Setup Script](https://github.com/enginyilmaaz/ubuntu-setup-script).
 
-**Version:** 1.0.0
+**Version:** 1.1.0
 
 ## 🚀 Quick Start
 
@@ -63,6 +63,7 @@ Everything below is reachable through the interactive menu (`--menu`) or directl
 | `--tweaks` | Windows desktop tweaks (submenu) |
 | `--debloat` | Remove pre-installed bloat (submenu) |
 | `--login` | CLI login helpers |
+| `--skip-update` | Skip the self-update check |
 
 > **Package strategy:** each tool is installed by **downloading the official installer / GitHub release directly** first, falling back to **winget**, then **Chocolatey** — so you always get the vendor's build when possible.
 
@@ -123,11 +124,14 @@ Remove pre-installed Windows apps and (optionally) the dev tools/browsers this s
 <details>
 <summary>What can be removed — click to expand</summary>
 
+- **Special (force-removed using the methods from the most-starred debloat tools):** **Microsoft Edge** (`EdgeUpdateDev\AllowUninstall` unblock + `setup.exe --force-uninstall`), **OneDrive** (built-in `OneDriveSetup /uninstall` + task/registry/leftover cleanup)
 - **UWP bloat:** Xbox, Get Help, Tips, Feedback Hub, Maps, Weather, News, Solitaire Collection, Groove Music, Movies & TV, People, Phone Link, Clipchamp, consumer Teams, Copilot, Quick Assist
 - **Dev tools / browsers:** Chrome, Node.js, Docker, VS Code, DBeaver, Postman, FileZilla, GitHub CLI, cloudflared
 - **Remote tools:** AnyDesk, RustDesk, TeamViewer, RealVNC
 
 </details>
+
+> ⚠️ **Edge** is protected by Windows; force-removal can affect WebView-dependent apps and Windows may reinstall it on major updates. It is strictly opt-in from the Debloat sub-menu.
 
 ## 🎛️ Interactive Menu
 
@@ -150,6 +154,13 @@ The script backs up settings (System Restore point + registry export) before mak
 # Restore previous settings
 & ([scriptblock]::Create((irm 'https://bit.ly/windows-ey'))) --restore
 ```
+
+## 🔄 Self-Update
+
+On start, the script checks the Gist for a newer revision (compares its own `SCRIPT_REVISION`). If a newer one exists, it offers to download and re-launch it automatically — so `irm | iex` always ends up running the latest version.
+
+- Skip it with `--skip-update`, or by setting the environment variable `SKIP_UPDATE_CHECK=1`.
+- The check is automatically skipped when running from a local git checkout (so development copies are never overwritten).
 
 ## 🔀 Combining Flags
 
