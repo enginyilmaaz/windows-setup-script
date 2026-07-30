@@ -4,7 +4,7 @@ A comprehensive, modular PowerShell script that automates Windows 10/11 post-ins
 
 The Windows-native counterpart of the [Ubuntu Post-Installation Setup Script](https://github.com/enginyilmaaz/ubuntu-setup-script).
 
-**Version:** 1.1.0
+**Version:** 1.2.0
 
 ## 🚀 Quick Start
 
@@ -100,7 +100,7 @@ Everything below is reachable through the interactive menu (`--menu`) or directl
 | Script Launcher | Right-click context menu (Claude, Codex, VS Code) |
 | OpenSSH Server | Install + auto-start SSH server (port 22) |
 | Change Hostname | Set the computer's hostname |
-| CLI Aliases | PowerShell profile functions (`claude-skip`, etc.) |
+| CLI Aliases | Profile functions: `claude-skip`, `ccskip`, `cckimi`/`ccglm` (Claude Code on the Kimi / Z.AI-GLM backends), `cckimi-token`/`ccglm-token` (save the API key), `codex-skip`, `cxskip` |
 | Screen Off: Never | Disable display timeout + sleep |
 | Show Hidden Files | Show hidden files + file extensions |
 | Keyboard: Turkish Q | Add Turkish-Q keyboard layout |

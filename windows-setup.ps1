@@ -6,7 +6,7 @@
     Automates Windows 10/11 post-installation setup with modular options.
     Windows-native counterpart of ubuntu-setup.sh (https://github.com/enginyilmaaz/ubuntu-setup-script).
 .NOTES
-    Version : 1.1.0
+    Version : 1.2.0
     Author  : enginyilmaaz
     License : MIT
 
@@ -19,13 +19,13 @@
 
 #===============================================================================
 # Windows Post-Installation Setup Script
-# Version: 1.1.0
+# Version: 1.2.0
 # Author: enginyilmaaz
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.1.0'
-$script:SCRIPT_REVISION = '4'
+$script:SCRIPT_VERSION  = '1.2.0'
+$script:SCRIPT_REVISION = '5'
 $script:SCRIPT_DATE     = '2026-07-27'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -1930,7 +1930,7 @@ function Set-ComputerHostname {
 # profile. Mirrors setup_cli_shortcuts (same alias names/commands, adapted to
 # PowerShell functions since aliases cannot carry arguments).
 function Set-CliAliases {
-    Write-LogInfo "Adding CLI alias functions (claude-skip, ccskip, codex-skip, cxskip) to the PowerShell profile..."
+    Write-LogInfo "Adding CLI alias functions (claude-skip, ccskip, cckimi, ccglm, cckimi-token, ccglm-token, codex-skip, cxskip) to the PowerShell profile..."
 
     $profilePath = $PROFILE.CurrentUserAllHosts
     $dir = Split-Path -Parent $profilePath
@@ -1949,18 +1949,83 @@ function Set-CliAliases {
         $pattern = '(?ms)^# BEGIN smai-aliases.*?^# END smai-aliases\r?\n?'
         $cleaned = [System.Text.RegularExpressions.Regex]::Replace($existing, $pattern, '')
 
-        $block = @(
-            '# BEGIN smai-aliases',
-            'function claude-skip { claude --dangerously-skip-permissions --effort max @args }',
-            'function ccskip     { claude --dangerously-skip-permissions --effort max @args }',
-            'function codex-skip { codex --sandbox danger-full-access -c ''model_reasoning_effort=xhigh'' @args }',
-            'function cxskip     { codex --sandbox danger-full-access -c ''model_reasoning_effort=xhigh'' @args }',
-            '# END smai-aliases'
-        ) -join "`r`n"
+        # Written verbatim into the profile (single-quoted here-string => no expansion here;
+        # the $env/$token/@args inside expand later, in the user's session).
+        $block = @'
+# BEGIN smai-aliases
+function claude-skip { claude --dangerously-skip-permissions --effort max @args }
+function ccskip      { claude --dangerously-skip-permissions --effort max @args }
+function codex-skip  { codex --sandbox danger-full-access -c 'model_reasoning_effort=xhigh' @args }
+function cxskip      { codex --sandbox danger-full-access -c 'model_reasoning_effort=xhigh' @args }
+
+# cckimi -> Claude Code on the Kimi backend (token in ~/.kimi_token)
+function cckimi {
+    $tf = Join-Path $HOME '.kimi_token'
+    if (-not (Test-Path $tf)) { Write-Host "cckimi: token file not found: $tf" -ForegroundColor Red; return }
+    $token = (Get-Content -Raw $tf).Trim()
+    if (-not $token) { Write-Host "cckimi: token file is empty: $tf" -ForegroundColor Red; return }
+    $vars = [ordered]@{
+        ANTHROPIC_BASE_URL              = 'https://api.kimi.com/coding/'
+        ANTHROPIC_AUTH_TOKEN            = $token
+        ANTHROPIC_MODEL                 = 'kimi-k3[1m]'
+        ANTHROPIC_DEFAULT_OPUS_MODEL    = 'kimi-k3[1m]'
+        ANTHROPIC_DEFAULT_SONNET_MODEL  = 'kimi-k3[1m]'
+        ANTHROPIC_DEFAULT_HAIKU_MODEL   = 'kimi-k3[1m]'
+        ANTHROPIC_DEFAULT_FABLE_MODEL   = 'kimi-k3[1m]'
+        CLAUDE_CODE_SUBAGENT_MODEL      = 'kimi-k3[1m]'
+        ENABLE_TOOL_SEARCH              = 'false'
+        CLAUDE_CODE_AUTO_COMPACT_WINDOW = '1048576'
+        CLAUDE_CODE_EFFORT_LEVEL        = 'max'
+    }
+    $old = @{}
+    foreach ($k in $vars.Keys) { $old[$k] = [Environment]::GetEnvironmentVariable($k); Set-Item -Path "env:$k" -Value $vars[$k] }
+    try { claude --dangerously-skip-permissions --effort max @args }
+    finally { foreach ($k in $vars.Keys) { if ($null -eq $old[$k]) { Remove-Item -Path "env:$k" -ErrorAction SilentlyContinue } else { Set-Item -Path "env:$k" -Value $old[$k] } } }
+}
+
+# ccglm -> Claude Code on the Z.AI GLM backend (token in ~/.zai_token)
+function ccglm {
+    $tf = Join-Path $HOME '.zai_token'
+    if (-not (Test-Path $tf)) { Write-Host "ccglm: token file not found: $tf" -ForegroundColor Red; return }
+    $token = (Get-Content -Raw $tf).Trim()
+    if (-not $token) { Write-Host "ccglm: token file is empty. Write your Z.AI API key into: $tf" -ForegroundColor Red; return }
+    $vars = [ordered]@{
+        ANTHROPIC_BASE_URL                       = 'https://api.z.ai/api/anthropic'
+        ANTHROPIC_AUTH_TOKEN                     = $token
+        ANTHROPIC_MODEL                          = 'glm-5.2[1m]'
+        ANTHROPIC_DEFAULT_OPUS_MODEL             = 'glm-5.2[1m]'
+        ANTHROPIC_DEFAULT_SONNET_MODEL           = 'glm-5.2[1m]'
+        ANTHROPIC_DEFAULT_HAIKU_MODEL            = 'glm-5.2[1m]'
+        ANTHROPIC_DEFAULT_FABLE_MODEL            = 'glm-5.2[1m]'
+        CLAUDE_CODE_SUBAGENT_MODEL               = 'glm-5.2[1m]'
+        CLAUDE_CODE_AUTO_COMPACT_WINDOW          = '1000000'
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
+        API_TIMEOUT_MS                           = '3000000'
+    }
+    $old = @{}
+    foreach ($k in $vars.Keys) { $old[$k] = [Environment]::GetEnvironmentVariable($k); Set-Item -Path "env:$k" -Value $vars[$k] }
+    try { claude --dangerously-skip-permissions @args }
+    finally { foreach ($k in $vars.Keys) { if ($null -eq $old[$k]) { Remove-Item -Path "env:$k" -ErrorAction SilentlyContinue } else { Set-Item -Path "env:$k" -Value $old[$k] } } }
+}
+
+# __cc_set_token <label> <token_file> [key] -- shared writer for the cc*-token helpers
+function __cc_set_token {
+    param([string]$Label, [string]$TokenFile, [string]$Key)
+    if (-not $Key) { $Key = Read-Host "$Label - paste API key" }
+    $Key = ($Key -replace '\s', '')
+    if (-not $Key) { Write-Host "${Label}: no key given, $TokenFile left unchanged" -ForegroundColor Yellow; return }
+    Set-Content -Path $TokenFile -Value $Key -NoNewline -Encoding ascii
+    try { icacls $TokenFile /inheritance:r /grant:r "${env:USERNAME}:(R,W)" | Out-Null } catch { }
+    Write-Host "${Label}: key written to $TokenFile ($($Key.Length) chars, current-user only)." -ForegroundColor Green
+}
+function cckimi-token { param([string]$Key) __cc_set_token 'cckimi' (Join-Path $HOME '.kimi_token') $Key }
+function ccglm-token  { param([string]$Key) __cc_set_token 'ccglm'  (Join-Path $HOME '.zai_token')  $Key }
+# END smai-aliases
+'@
 
         $new = $cleaned.TrimEnd() + "`r`n`r`n" + $block + "`r`n"
         Set-Content -LiteralPath $profilePath -Value $new -Encoding UTF8
-        Write-LogSuccess "Aliases added: claude-skip, ccskip, codex-skip, cxskip (open a new PowerShell session to use them)."
+        Write-LogSuccess "Aliases added: claude-skip, ccskip, cckimi, ccglm, cckimi-token, ccglm-token, codex-skip, cxskip (open a new PowerShell session to use them)."
         return $true
     } catch {
         Write-LogWarning "Could not update the PowerShell profile: $($_.Exception.Message)"
