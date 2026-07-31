@@ -25,7 +25,7 @@
 #===============================================================================
 
 $script:SCRIPT_VERSION  = '1.2.1'
-$script:SCRIPT_REVISION = '6'
+$script:SCRIPT_REVISION = '7'
 $script:SCRIPT_DATE     = '2026-07-27'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -521,7 +521,7 @@ $script:WindowsTweaks = @(
     @{ Key='script-launcher';  Label='Script Launcher (right-click menu)';   Apply='Set-ScriptLauncherContextMenu' }
     @{ Key='openssh';          Label='OpenSSH Server';                       Apply='Enable-OpenSSHServer' }
     @{ Key='hostname';         Label='Change Hostname';                      Apply='Set-ComputerHostname'; NeedsInput='hostname' }
-    @{ Key='cli-aliases';      Label='CLI Aliases (claude-skip, etc.)';      Apply='Set-CliAliases' }
+    @{ Key='cli-aliases';      Label='CLI Aliases (claude-skip, cckimi, ccglm, codex-skip)'; Apply='Set-CliAliases' }
     @{ Key='screen-never-off'; Label='Screen Off: Never';                    Apply='Disable-ScreenTimeout' }
     @{ Key='show-hidden';      Label='Show Hidden Files + Extensions';       Apply='Show-HiddenFiles' }
     @{ Key='keyboard-tr-q';    Label='Keyboard: Turkish Q';                  Apply='Add-KeyboardTurkishQ' }
