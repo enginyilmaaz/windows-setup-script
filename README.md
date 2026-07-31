@@ -99,7 +99,7 @@ Everything below is reachable through the interactive menu (`--menu`) or directl
 | Script Launcher | Right-click context menu (Claude, Codex, VS Code) |
 | OpenSSH Server | Install + auto-start SSH server (port 22) |
 | Change Hostname | Set the computer's hostname |
-| CLI Aliases | Profile functions: `claude-skip`, `ccskip`, `cckimi`/`ccglm` (Claude Code on the Kimi / Z.AI-GLM backends), `cckimi-token`/`ccglm-token` (save the API key), `codex-skip`, `cxskip` |
+| CLI Aliases | Global commands in `%USERPROFILE%\apps\aliases\` (added to PATH, so they work from any shell): `claude-skip`, `ccskip`, `cckimi`/`ccglm` (Claude Code on the Kimi / Z.AI-GLM backends), `cckimi-token`/`ccglm-token` (save the API key), `codex-skip`, `cxskip` |
 | Screen Off: Never | Disable display timeout + sleep |
 | Show Hidden Files | Show hidden files + file extensions |
 | Keyboard: Turkish Q | Add Turkish-Q keyboard layout |
