@@ -4,7 +4,7 @@ A comprehensive, modular PowerShell script that automates Windows 10/11 post-ins
 
 The Windows-native counterpart of the [Ubuntu Post-Installation Setup Script](https://github.com/enginyilmaaz/ubuntu-setup-script).
 
-**Version:** 1.2.0
+**Version:** 1.2.1
 
 ## 🚀 Quick Start
 
@@ -77,7 +77,6 @@ Everything below is reachable through the interactive menu (`--menu`) or directl
 | `--grok` | **Grok** — xAI CLI |
 | `--gemini` | **Gemini CLI** — Google |
 | `--qwen` | **Qwen Code** — Alibaba |
-| `--glm` | **GLM Code** — z.ai coding helper |
 | `--glm-opencode` | **GLM With OpenCode** — OpenCode pre-configured for z.ai GLM |
 
 ### 🖥️ Remote Support Tools

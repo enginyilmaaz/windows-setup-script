@@ -6,7 +6,7 @@
     Automates Windows 10/11 post-installation setup with modular options.
     Windows-native counterpart of ubuntu-setup.sh (https://github.com/enginyilmaaz/ubuntu-setup-script).
 .NOTES
-    Version : 1.2.0
+    Version : 1.2.1
     Author  : enginyilmaaz
     License : MIT
 
@@ -19,13 +19,13 @@
 
 #===============================================================================
 # Windows Post-Installation Setup Script
-# Version: 1.2.0
+# Version: 1.2.1
 # Author: enginyilmaaz
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.2.0'
-$script:SCRIPT_REVISION = '5'
+$script:SCRIPT_VERSION  = '1.2.1'
+$script:SCRIPT_REVISION = '6'
 $script:SCRIPT_DATE     = '2026-07-27'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -59,7 +59,7 @@ $flags = @{
     Gh         = $false; Postman = $false; FileZilla = $false
     # AI CLI
     Claude     = $false; Codex = $false; Kimi = $false; Grok = $false
-    Gemini     = $false; Qwen = $false; Glm = $false; Opencode = $false
+    Gemini     = $false; Qwen = $false; Opencode = $false
     AiCli      = $false
     # remote
     Vnc        = $false; AnyDesk = $false; RustDesk = $false; TeamViewer = $false
@@ -105,7 +105,6 @@ foreach ($arg in $script:RAW_ARGS) {
         'grok'        { $flags.Grok = $true }
         'gemini'      { $flags.Gemini = $true }
         'qwen'        { $flags.Qwen = $true }
-        'glm'         { $flags.Glm = $true }
         'glm-opencode' { $flags.Opencode = $true }
         'opencode'    { $flags.Opencode = $true }
         'aicli'       { $flags.AiCli = $true }
@@ -450,7 +449,6 @@ AI CLI TOOLS:
   --grok            Grok (xAI)
   --gemini          Gemini CLI (Google)
   --qwen            Qwen Code (Alibaba)
-  --glm             GLM Code (z.ai)
   --glm-opencode    OpenCode preconfigured for z.ai GLM
 
 REMOTE SUPPORT:
@@ -506,7 +504,6 @@ $script:AiCliTools = @(
     @{ Key='grok';     Flag='Grok';     Label='Grok (xAI)';              Install='Install-Grok';         Detect='Test-GrokInstalled' }
     @{ Key='gemini';   Flag='Gemini';   Label='Gemini CLI (Google)';     Install='Install-Gemini';       Detect='Test-GeminiInstalled' }
     @{ Key='qwen';     Flag='Qwen';     Label='Qwen Code (Alibaba)';     Install='Install-Qwen';         Detect='Test-QwenInstalled' }
-    @{ Key='glm';      Flag='Glm';      Label='GLM Code (z.ai)';         Install='Install-Glm';          Detect='Test-GlmInstalled' }
     @{ Key='opencode'; Flag='Opencode'; Label='GLM with OpenCode';       Install='Install-GlmOpencode';  Detect='Test-GlmOpencodeInstalled' }
 )
 
@@ -1348,24 +1345,6 @@ function Install-Qwen {
 function Test-QwenInstalled { Test-Command 'qwen' }
 
 #===============================================================================
-# GLM Code helper (z.ai) - npm @z_ai/coding-helper  (command: chelper)
-#===============================================================================
-function Install-Glm {
-    return Install-App -Name 'GLM Code helper (z.ai)' `
-        -Detect { Test-Command 'chelper' } `
-        -Direct {
-            if (-not (Test-Command 'npm')) { Install-NodeJs }
-            npm install -g '@z_ai/coding-helper'
-            if ($LASTEXITCODE -ne 0) { throw 'npm install failed' }
-        } `
-        -PostInstall {
-            Write-LogInfo "  GLM Code helper installed (run: chelper)"
-            Write-LogInfo "  Subscribe + get API key: https://z.ai/subscribe"
-        }
-}
-function Test-GlmInstalled { Test-Command 'chelper' }
-
-#===============================================================================
 # GLM With OpenCode (z.ai GLM-5.2)
 #   Installs OpenCode (npm opencode-ai preferred, official installer fallback) and
 #   preconfigures z.ai GLM-5.2 as the default model. No -Detect so the config step
@@ -1961,9 +1940,16 @@ function cxskip      { codex --sandbox danger-full-access -c 'model_reasoning_ef
 # cckimi -> Claude Code on the Kimi backend (token in ~/.kimi_token)
 function cckimi {
     $tf = Join-Path $HOME '.kimi_token'
-    if (-not (Test-Path $tf)) { Write-Host "cckimi: token file not found: $tf" -ForegroundColor Red; return }
-    $token = (Get-Content -Raw $tf).Trim()
-    if (-not $token) { Write-Host "cckimi: token file is empty: $tf" -ForegroundColor Red; return }
+    $token = ''
+    if (Test-Path $tf) { $token = (Get-Content -Raw $tf -ErrorAction SilentlyContinue).Trim() }
+    if (-not $token) {
+        $sec = Read-Host 'cckimi: no API key found. Enter your Kimi API key' -AsSecureString
+        $token = ([Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))).Trim()
+        if (-not $token) { Write-Host 'cckimi: no key entered, aborting.' -ForegroundColor Red; return }
+        Set-Content -Path $tf -Value $token -NoNewline -Encoding ascii
+        try { icacls $tf /inheritance:r /grant:r "${env:USERNAME}:(R,W)" | Out-Null } catch { }
+        Write-Host "cckimi: key saved to $tf (current-user only)." -ForegroundColor Green
+    }
     $vars = [ordered]@{
         ANTHROPIC_BASE_URL              = 'https://api.kimi.com/coding/'
         ANTHROPIC_AUTH_TOKEN            = $token
@@ -1986,9 +1972,16 @@ function cckimi {
 # ccglm -> Claude Code on the Z.AI GLM backend (token in ~/.zai_token)
 function ccglm {
     $tf = Join-Path $HOME '.zai_token'
-    if (-not (Test-Path $tf)) { Write-Host "ccglm: token file not found: $tf" -ForegroundColor Red; return }
-    $token = (Get-Content -Raw $tf).Trim()
-    if (-not $token) { Write-Host "ccglm: token file is empty. Write your Z.AI API key into: $tf" -ForegroundColor Red; return }
+    $token = ''
+    if (Test-Path $tf) { $token = (Get-Content -Raw $tf -ErrorAction SilentlyContinue).Trim() }
+    if (-not $token) {
+        $sec = Read-Host 'ccglm: no API key found. Enter your Z.AI API key' -AsSecureString
+        $token = ([Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))).Trim()
+        if (-not $token) { Write-Host 'ccglm: no key entered, aborting.' -ForegroundColor Red; return }
+        Set-Content -Path $tf -Value $token -NoNewline -Encoding ascii
+        try { icacls $tf /inheritance:r /grant:r "${env:USERNAME}:(R,W)" | Out-Null } catch { }
+        Write-Host "ccglm: key saved to $tf (current-user only)." -ForegroundColor Green
+    }
     $vars = [ordered]@{
         ANTHROPIC_BASE_URL                       = 'https://api.z.ai/api/anthropic'
         ANTHROPIC_AUTH_TOKEN                     = $token
