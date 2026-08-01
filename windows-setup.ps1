@@ -25,7 +25,7 @@
 #===============================================================================
 
 $script:SCRIPT_VERSION  = '1.4.0'
-$script:SCRIPT_REVISION = '14'
+$script:SCRIPT_REVISION = '15'
 $script:SCRIPT_DATE     = '2026-07-27'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -3028,10 +3028,20 @@ function Show-TweaksSubmenu {
         if ($t.ShowIf -and -not (& $t.ShowIf)) { continue }   # conditional tweaks (e.g. Node switch)
         $n++
         $mk = ''; if (Test-TweakApplied -Key $t.Key) { $mk = 'applied' }
-        [void]$rows.Add(@{ Num = $n; Label = $t.Label; Desc = ''; Marker = $mk; Selected = ($script:SelectedTweaks -contains $t.Key); IsGroup = $false; OnEnter = $null; Ref = $t })
+        [void]$rows.Add(@{ Num = $n; Label = $t.Label; Desc = ''; Marker = $mk; Selected = ($script:SelectedTweaks -contains $t.Key); IsGroup = $false; OnEnter = $null; Kind = 'tweak'; Ref = $t })
     }
-    if ((Invoke-SelectMenu -Banner 'Windows Tweaks' -Rows $rows) -eq 'confirm') {
-        $script:SelectedTweaks = @($rows | Where-Object { $_.Selected } | ForEach-Object { $_.Ref.Key })
+    # CLI aliases - individually selectable here; cckimi/ccglm auto-add their -token setter.
+    foreach ($a in $script:CliAliases) {
+        $n++
+        $inst = Test-AliasInstalled $a.Key
+        $mk = if ($inst) { 'installed' } else { '' }
+        $sel = ($script:SelectedAliases -contains $a.Key) -or $inst
+        [void]$rows.Add(@{ Num = $n; Label = ('CLI alias: ' + $a.Label); Desc = ''; Marker = $mk; Selected = $sel; IsGroup = $false; OnEnter = $null; Kind = 'alias'; Ref = $a })
+    }
+    if ((Invoke-SelectMenu -Banner 'Windows Tweaks + CLI Aliases' -Rows $rows) -eq 'confirm') {
+        $script:SelectedTweaks  = @($rows | Where-Object { $_.Kind -eq 'tweak' -and $_.Selected } | ForEach-Object { $_.Ref.Key })
+        $script:SelectedAliases = @($rows | Where-Object { $_.Kind -eq 'alias' -and $_.Selected } | ForEach-Object { $_.Ref.Key })
+        $script:AliasesTouched = $true
         if ($script:SelectedTweaks.Count -gt 0) { $flags.Tweaks = $true }
         if (($script:SelectedTweaks -contains 'hostname') -and -not $script:HostnameValue) {
             Set-MenuCursorVisible $true
@@ -3071,22 +3081,6 @@ function Show-VSCodeSubmenu {
     }
 }
 
-function Show-AliasesSubmenu {
-    $rows = New-Object System.Collections.ArrayList
-    $n = 0
-    foreach ($a in $script:CliAliases) {
-        $n++
-        $installed = Test-AliasInstalled $a.Key
-        $mk = if ($installed) { 'installed' } else { '' }
-        $sel = ($script:SelectedAliases -contains $a.Key) -or $installed
-        [void]$rows.Add(@{ Num = $n; Label = $a.Label; Desc = ''; Marker = $mk; Selected = $sel; IsGroup = $false; OnEnter = $null; Ref = $a })
-    }
-    if ((Invoke-SelectMenu -Banner 'CLI Aliases  (cckimi/ccglm auto-add their -token)' -Rows $rows) -eq 'confirm') {
-        $script:SelectedAliases = @($rows | Where-Object { $_.Selected } | ForEach-Object { $_.Ref.Key })
-        $script:AliasesTouched = $true
-    }
-}
-
 #-------------------------------------------------------------------------------
 # Main interactive menu (birebir: one flat numbered list, groups expand on ENTER)
 #-------------------------------------------------------------------------------
@@ -3104,7 +3098,6 @@ function Show-InteractiveMenu {
     $twInst = @($script:WindowsTweaks| Where-Object { Test-TweakApplied -Key $_.Key }).Count
     $dbInst = @($script:DebloatItems | Where-Object { Test-BloatRemoved -Item $_ }).Count
     $vsInst = if (Test-VSCodeInstalled) { 'installed' } else { '' }
-    $alInst = @($script:CliAliases | Where-Object { Test-AliasInstalled $_.Key }).Count
 
     # Birebir order + descriptions
     $order = @(
@@ -3119,7 +3112,6 @@ function Show-InteractiveMenu {
         @{ k='cloudflared';                   label='Cloudflared';  desc='Cloudflare Tunnel client' }
         @{ k='docker';                        label='Docker';       desc='Docker Desktop' }
         @{ k='aicli';       group='aicli';   label='AI CLI Tools'; desc='Claude, Codex, Kimi, Grok, Gemini, Qwen, GLM (Enter to expand)'; marker=(Get-GroupMarkerText $aiInst $script:AiCliTools.Count 'installed') }
-        @{ k='aliases';     group='aliases'; label='CLI Aliases';  desc='ccskip, cxskip, cckimi, ccglm (Enter to expand)'; marker=(Get-GroupMarkerText $alInst $script:CliAliases.Count 'installed') }
         @{ k='gh';                            label='GitHub CLI';   desc='GitHub CLI (gh)' }
         @{ k='postman';                       label='Postman';      desc='Postman (API testing)' }
         @{ k='filezilla';                     label='FileZilla';    desc='FileZilla (FTP/SFTP)' }
@@ -3138,15 +3130,13 @@ function Show-InteractiveMenu {
                 'tweaks'  { { Show-TweaksSubmenu } }
                 'aicli'   { { Show-AiCliSubmenu } }
                 'debloat' { { Show-DebloatSubmenu } }
-                'aliases' { { Show-AliasesSubmenu } }
             }
             $check = switch ($g) {
                 'remote'  { { @($script:RemoteTools | Where-Object { $flags[$_.Flag] }).Count -gt 0 } }
                 'vscode'  { { [bool]$flags.VSCode -or $script:SelectedVSCodeExt.Count -gt 0 } }
-                'tweaks'  { { $script:SelectedTweaks.Count -gt 0 } }
+                'tweaks'  { { $script:SelectedTweaks.Count -gt 0 -or $script:SelectedAliases.Count -gt 0 } }
                 'aicli'   { { @($script:AiCliTools | Where-Object { $flags[$_.Flag] }).Count -gt 0 } }
                 'debloat' { { $script:SelectedDebloat.Count -gt 0 } }
-                'aliases' { { $script:SelectedAliases.Count -gt 0 } }
             }
             [void]$rows.Add(@{ Num=$n; Label=$o.label; Desc=$o.desc; Marker=$o.marker; IsGroup=$true; OnEnter=$onEnter; SelectedCheck=$check })
         } else {

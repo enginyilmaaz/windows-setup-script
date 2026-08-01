@@ -141,11 +141,11 @@ Run without flags (or with `--menu`) for a keyboard-driven menu:
 irm https://bit.ly/windows-ey | iex
 ```
 
-Navigate with **↑↓**, toggle with **SPACE**, `a` = all, `n` = none, `c`/`ESC` = save & continue, `q` = discard. Grouped items (AI CLI Tools, Remote Support Tools, Windows Tweaks, Debloat, VS Code, CLI Aliases) open their own submenus.
+Navigate with **↑↓**, toggle with **SPACE**, `a` = all, `n` = none, `c`/`ESC` = save & continue, `q` = discard. Grouped items (AI CLI Tools, Remote Support Tools, Windows Tweaks, Debloat, VS Code) open their own submenus.
 
-### 🔑 CLI Aliases (submenu)
+### 🔑 CLI Aliases
 
-Global `.cmd` commands installed into `%USERPROFILE%\apps\aliases\` (added to PATH, so they work from any shell). Pick them individually in the **CLI Aliases** submenu:
+Global `.cmd` commands installed into `%USERPROFILE%\apps\aliases\` (added to PATH, so they work from any shell). Pick them individually inside the **Windows Tweaks** submenu:
 
 - `ccskip` / `cxskip` — Claude / Codex with skip-permission flags
 - `cckimi` / `ccglm` — Claude Code on the Kimi / Z.AI-GLM backends (selecting one **auto-installs** its `cckimi-token` / `ccglm-token` key setter)
