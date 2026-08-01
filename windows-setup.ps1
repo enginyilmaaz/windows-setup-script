@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.4.1'
-$script:SCRIPT_REVISION = '16'
+$script:SCRIPT_VERSION  = '1.5.0'
+$script:SCRIPT_REVISION = '17'
 $script:SCRIPT_DATE     = '2026-07-27'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -2174,12 +2174,25 @@ echo ccglm-token: key written to %TOKENFILE% (current-user only).
         if ($install['cckimi']) { $install['cckimi-token'] = $true }   # cckimi -> also cckimi-token
         if ($install['ccglm'])  { $install['ccglm-token']  = $true }   # ccglm  -> also ccglm-token
 
+        # If any selected alias is already installed, ask once before overwriting them.
+        $already = @($cmds.Keys | Where-Object { $install[$_] -and (Test-AliasInstalled $_) })
+        $overwrite = $true
+        if ($already.Count -gt 0) {
+            Set-MenuCursorVisible $true
+            Write-Host ""
+            $ans = Read-Host ("These aliases are already installed: {0}. Overwrite? (y/n)" -f ($already -join ', '))
+            $overwrite = ($ans -match '^[Yy]')
+            if (-not $overwrite) { Write-LogInfo "Keeping the existing copies of: $($already -join ', ')" }
+        }
+
         # Remove discontinued aliases everywhere (all PATH dirs incl. ~/.local/bin + session).
         foreach ($n in @('claude-skip', 'codex-skip')) { Remove-AliasEverywhere $n }
         # For every managed alias: remove EVERY existing copy (any PATH dir, extensionless or
         # .cmd/.bat/.ps1, + session fn/alias), then (re)write ONLY the ones in the install set.
         # Deselected ones therefore get uninstalled.
         foreach ($name in $cmds.Keys) {
+            # Already installed + user declined overwrite -> leave that alias untouched.
+            if ($install[$name] -and -not $overwrite -and (Test-AliasInstalled $name)) { continue }
             Remove-AliasEverywhere $name
             if ($install[$name]) {
                 # Write fresh (CRLF + ASCII, no BOM) so cmd.exe handles labels/goto correctly.
@@ -2927,6 +2940,7 @@ function Invoke-SelectMenu {
         [scriptblock]$OnSelectNone
     )
     $cursor = 0
+    $numBuf = ''
     $needClear = $false
     $vt = Enable-VirtualTerminal
     $e = [char]27
@@ -2959,7 +2973,9 @@ function Invoke-SelectMenu {
             }
             [void]$lines.Add(@(@{ t = '  ---------------------------------------------------------------'; c = 'Yellow' }))
             if ($Summary) { [void]$lines.Add(@(@{ t = ('  ' + (& $Summary)); c = 'Green' })) } else { [void]$lines.Add(@(@{ t = '' })) }
-            [void]$lines.Add(@(@{ t = '   UP/DN move  SPACE toggle  ENTER sub-menu  a all  n none  c confirm  q quit'; c = 'DarkGray' }))
+            $hint = '   UP/DN move  0-9 jump  SPACE toggle  ENTER sub-menu  a all  n none  c confirm  q quit'
+            if ($numBuf) { $hint += "    #$numBuf" }
+            [void]$lines.Add(@(@{ t = $hint; c = 'DarkGray' }))
 
             if ($vt) {
                 # Single write: home the cursor, paint every line, erase everything below.
@@ -2980,6 +2996,17 @@ function Invoke-SelectMenu {
             $k   = [System.Console]::ReadKey($true)
             $key = $k.Key
             $ch  = [char]::ToLower([char]$k.KeyChar)
+            $kc  = [char]$k.KeyChar
+
+            # Type a number (multi-digit) to jump the cursor to that item; then SPACE/ENTER toggles.
+            if ($kc -ge '0' -and $kc -le '9') {
+                $numBuf += $kc
+                $t = [int]$numBuf
+                if ($t -lt 1 -or $t -gt $Rows.Count) { $numBuf = [string]$kc; $t = [int]$numBuf }
+                if ($t -ge 1 -and $t -le $Rows.Count) { $cursor = $t - 1 } else { $numBuf = '' }
+                continue
+            }
+            $numBuf = ''
 
             if ($key -eq 'UpArrow'   -or $ch -eq 'k') { if ($cursor -gt 0) { $cursor-- } }
             elseif ($key -eq 'DownArrow' -or $ch -eq 'j') { if ($cursor -lt $Rows.Count - 1) { $cursor++ } }
