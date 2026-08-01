@@ -111,6 +111,8 @@ Everything below is reachable through the interactive menu (`--menu`) or directl
 | Activate Error Reporting | Enable Windows Error Reporting |
 | Install Camera App | Install the Windows Camera app |
 | Cleanup: Storage Sense | Auto-clean temp files & recycle bin |
+| Node.js: switch to NVM | Replace a native Node.js with nvm-windows (shown only when Node is non-NVM) |
+| Node.js: switch to native | Replace nvm-windows with a native Node.js LTS (shown only when NVM is installed) |
 
 </details>
 

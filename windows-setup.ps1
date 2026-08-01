@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.2.1'
-$script:SCRIPT_REVISION = '11'
+$script:SCRIPT_VERSION  = '1.3.0'
+$script:SCRIPT_REVISION = '12'
 $script:SCRIPT_DATE     = '2026-07-27'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -483,7 +483,7 @@ function Show-Version {
 
 # Top-level dev tools (each toggles an install)
 $script:DevTools = @(
-    @{ Key='nodejs';      Flag='NodeJs';      Label='Node.js (nvm-windows)';  Install='Install-NodeJs';      Detect='Test-NodeJsInstalled' }
+    @{ Key='nodejs';      Flag='NodeJs';      Label='Node.js (nvm-windows)';  Install='Install-NodeJs';      Detect='Test-NodeJsInstalled'; Marker='Get-NodeJsMarker' }
     @{ Key='python';      Flag='Python';      Label='Python 3';               Install='Install-Python';      Detect='Test-PythonInstalled' }
     @{ Key='docker';      Flag='Docker';      Label='Docker Desktop';         Install='Install-Docker';      Detect='Test-DockerInstalled' }
     @{ Key='chrome';      Flag='Chrome';      Label='Google Chrome';          Install='Install-Chrome';      Detect='Test-ChromeInstalled' }
@@ -533,6 +533,9 @@ $script:WindowsTweaks = @(
     @{ Key='error-reporting';  Label='Activate Error Reporting';             Apply='Enable-WindowsErrorReporting' }
     @{ Key='camera';           Label='Install Camera App';                   Apply='Install-CameraApp' }
     @{ Key='storage-sense';    Label='Cleanup: Storage Sense';               Apply='Enable-StorageSense' }
+    # Node.js switch tweaks - shown conditionally (ShowIf) based on current state
+    @{ Key='switch-node-nvm';    Label='Node.js: switch to NVM';              Apply='Switch-NodeToNvm';    ShowIf='Test-NodeIsNonNvm' }
+    @{ Key='switch-node-native'; Label='Node.js: switch to native (non-NVM)'; Apply='Switch-NodeToNative'; ShowIf='Test-NvmInstalled' }
 )
 
 # VS Code extensions (VS Code submenu) — IDs mirror the source install_vscode_extensions
@@ -562,6 +565,7 @@ $script:VSCodeExtensions = @(
 # 1. Node.js 22 (via nvm-windows) + Yarn   [source: install_nvm_nodejs, Node 22]
 #===============================================================================
 function Install-NodeJs {
+    param([switch]$Force)
     return Install-App -Name 'Node.js 22 (nvm-windows) + Yarn' `
         -Detect {
             if (-not (Test-Command 'node')) { return $false }
@@ -579,7 +583,7 @@ function Install-NodeJs {
             $p = Start-Process -FilePath $f -ArgumentList '/SILENT' -Wait -PassThru
             if ($p.ExitCode -ne 0) { throw "installer exit $($p.ExitCode)" }
         } `
-        -WingetId 'CoreyButler.NVMforWindows' -ChocoId 'nvm' `
+        -WingetId 'CoreyButler.NVMforWindows' -ChocoId 'nvm' -ForceReinstall:$Force `
         -PostInstall {
             # Refresh env (vars + PATH) from the registry so NVM_HOME / nvm are visible now.
             foreach ($scope in @('Machine', 'User')) {
@@ -631,6 +635,107 @@ function Install-NodeJs {
         }
 }
 function Test-NodeJsInstalled { Test-Command 'node' }
+
+#===============================================================================
+# Node.js: NVM (nvm-windows) vs native (non-NVM) detection + switching
+#===============================================================================
+
+# Is nvm-windows present? (command, NVM_HOME, or the known install locations)
+function Test-NvmInstalled {
+    if (Test-Command 'nvm') { return $true }
+    $cands = @()
+    if ($env:NVM_HOME)     { $cands += (Join-Path $env:NVM_HOME 'nvm.exe') }
+    if ($env:APPDATA)      { $cands += (Join-Path $env:APPDATA 'nvm\nvm.exe') }
+    if ($env:ProgramFiles) { $cands += (Join-Path $env:ProgramFiles 'nvm\nvm.exe') }
+    foreach ($p in $cands) { if (Test-Path -LiteralPath $p) { return $true } }
+    return $false
+}
+
+# Is Node.js present at all? (command or a registered native install)
+function Test-NodePresent {
+    if (Test-Command 'node') { return $true }
+    return (Test-App -DisplayNameLike '*Node.js*')
+}
+
+# Node exists but is NOT managed by nvm (native / non-nvm) -> tweak ShowIf.
+function Test-NodeIsNonNvm {
+    return ((Test-NodePresent) -and -not (Test-NvmInstalled))
+}
+
+# Menu marker for the NodeJS row: '' / 'installed (nvm)' / 'installed (non-nvm)'.
+function Get-NodeJsMarker {
+    if (Test-NvmInstalled) { return 'installed (nvm)' }
+    if (Test-NodePresent)  { return 'installed (non-nvm)' }
+    return ''
+}
+
+# Uninstall a native (non-nvm) Node.js: winget ids + MSI fallback.
+function Uninstall-NativeNode {
+    Write-LogInfo "Removing native Node.js..."
+    if (Test-Winget) {
+        winget uninstall --id 'OpenJS.NodeJS'     -e --silent --accept-source-agreements 2>$null
+        winget uninstall --id 'OpenJS.NodeJS.LTS' -e --silent --accept-source-agreements 2>$null
+    }
+    foreach ($k in @(
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')) {
+        Get-ItemProperty $k -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -like 'Node.js*' -and $_.UninstallString } |
+            ForEach-Object {
+                if ($_.UninstallString -match 'msiexec' -and $_.PSChildName -match '^\{.*\}$') {
+                    Start-Process 'msiexec.exe' -ArgumentList "/x $($_.PSChildName) /qn /norestart" -Wait -ErrorAction SilentlyContinue
+                }
+            }
+    }
+    Write-LogSuccess "Native Node.js removal attempted."
+}
+
+# Uninstall nvm-windows (also removes the nvm-managed node versions).
+function Uninstall-Nvm {
+    Write-LogInfo "Removing nvm-windows..."
+    if (Test-Winget) { winget uninstall --id 'CoreyButler.NVMforWindows' -e --silent --accept-source-agreements 2>$null }
+    foreach ($k in @(
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
+            'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*')) {
+        Get-ItemProperty $k -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -like '*NVM for Windows*' -and $_.UninstallString } |
+            ForEach-Object {
+                $exe = ($_.UninstallString -replace '"', '')
+                if ($exe -and (Test-Path -LiteralPath $exe)) {
+                    Start-Process $exe -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -ErrorAction SilentlyContinue
+                }
+            }
+    }
+    Write-LogSuccess "nvm-windows removal attempted."
+}
+
+# Install a native (non-nvm) Node.js LTS (no -Detect => always installs).
+function Install-NativeNode {
+    return Install-App -Name 'Node.js (native LTS)' `
+        -WingetId 'OpenJS.NodeJS.LTS' -ChocoId 'nodejs-lts' `
+        -PostInstall { Write-LogWarning "Open a NEW terminal so the native 'node' is on PATH." }
+}
+
+# Switch native (non-nvm) Node.js -> nvm-managed: remove native, install nvm + node 22.
+function Switch-NodeToNvm {
+    Write-LogStep "Switching Node.js to NVM"
+    if (Test-NvmInstalled) { Write-LogInfo "nvm-windows is already installed; nothing to switch."; return $true }
+    Uninstall-NativeNode
+    Install-NodeJs -Force | Out-Null
+    Write-LogSuccess "Switched Node.js to nvm-windows (open a new terminal)."
+    return $true
+}
+
+# Switch nvm-managed Node.js -> native (non-nvm): remove nvm, install native LTS.
+function Switch-NodeToNative {
+    Write-LogStep "Switching Node.js to native (non-NVM)"
+    if (-not (Test-NvmInstalled)) { Write-LogInfo "nvm-windows is not installed; nothing to switch."; return $true }
+    Uninstall-Nvm
+    Install-NativeNode | Out-Null
+    Write-LogSuccess "Switched Node.js to a native install (open a new terminal)."
+    return $true
+}
 
 #===============================================================================
 # 7. Python 3   [source: install_python]  -- winget primary (no stable latest URL)
@@ -2818,6 +2923,7 @@ function Show-TweaksSubmenu {
     $rows = New-Object System.Collections.ArrayList
     $n = 0
     foreach ($t in $script:WindowsTweaks) {
+        if ($t.ShowIf -and -not (& $t.ShowIf)) { continue }   # conditional tweaks (e.g. Node switch)
         $n++
         $mk = ''; if (Test-TweakApplied -Key $t.Key) { $mk = 'applied' }
         [void]$rows.Add(@{ Num = $n; Label = $t.Label; Desc = ''; Marker = $mk; Selected = ($script:SelectedTweaks -contains $t.Key); IsGroup = $false; OnEnter = $null; Ref = $t })
@@ -2923,7 +3029,7 @@ function Show-InteractiveMenu {
             [void]$rows.Add(@{ Num=$n; Label=$o.label; Desc=$o.desc; Marker=$o.marker; IsGroup=$true; OnEnter=$onEnter; SelectedCheck=$check })
         } else {
             $d = $dev[$o.k]
-            $mk = ''; if (& $d.Detect) { $mk = 'installed' }
+            if ($d.Marker) { $mk = & $d.Marker } else { $mk = ''; if (& $d.Detect) { $mk = 'installed' } }
             [void]$rows.Add(@{ Num=$n; Label=$o.label; Desc=$o.desc; Marker=$mk; IsGroup=$false; OnEnter=$null; Selected=$false; Ref=$d })
         }
     }
