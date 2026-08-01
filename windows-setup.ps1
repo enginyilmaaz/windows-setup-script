@@ -25,7 +25,7 @@
 #===============================================================================
 
 $script:SCRIPT_VERSION  = '1.2.1'
-$script:SCRIPT_REVISION = '8'
+$script:SCRIPT_REVISION = '9'
 $script:SCRIPT_DATE     = '2026-07-27'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -1906,19 +1906,17 @@ function Set-ComputerHostname {
 }
 
 # CLI Aliases: install claude-skip / ccskip / cckimi / ccglm / *-token / codex-skip /
-# cxskip as standalone commands under %USERPROFILE%\apps\aliases and add that folder to
-# PATH, so they work from ANY shell (cmd, PowerShell, Run) - not just a PS profile, and
-# not tied to a PowerShell edition. Each command is a <name>.cmd launcher + <name>.ps1
-# body; env vars set inside the .ps1 stay in that child process (no session pollution).
-# Mirrors setup_cli_shortcuts (same names/commands/backends).
+# cxskip as standalone .cmd commands under %USERPROFILE%\apps\aliases and add that
+# folder to PATH, so they work from ANY shell (cmd, PowerShell, Run). Pure batch, one
+# self-contained .cmd each - no .ps1. Env vars are scoped via setlocal to that cmd
+# process, so they don't leak into the caller. Mirrors setup_cli_shortcuts.
 function Set-CliAliases {
     $aliasDir = Join-Path $env:USERPROFILE 'apps\aliases'
-    Write-LogInfo "Installing CLI alias commands into $aliasDir and adding it to PATH..."
+    Write-LogInfo "Installing CLI alias .cmd commands into $aliasDir and adding it to PATH..."
     try {
         New-Item -ItemType Directory -Path $aliasDir -Force | Out-Null
 
-        # Migration: if an older version wrote alias functions into the PS profile, drop them
-        # (a profile function would otherwise shadow the new PATH command in PowerShell).
+        # Migration: drop the old PS-profile smai-aliases block if a previous version wrote it.
         $profilePath = $PROFILE.CurrentUserAllHosts
         if ($profilePath -and (Test-Path -LiteralPath $profilePath)) {
             $raw = Get-Content -LiteralPath $profilePath -Raw -ErrorAction SilentlyContinue
@@ -1928,109 +1926,124 @@ function Set-CliAliases {
             }
         }
 
-        # ---- alias bodies (each becomes <name>.ps1). Single-quoted here-strings => literal;
-        #      $env/$token/@args expand when the generated .ps1 runs. ----
-        $cckimiPs = @'
-$tf = Join-Path $HOME '.kimi_token'
-$token = ''
-if (Test-Path $tf) { $token = (Get-Content -Raw $tf -ErrorAction SilentlyContinue).Trim() }
-if (-not $token) {
-    $sec = Read-Host 'cckimi: no API key found. Enter your Kimi API key' -AsSecureString
-    $token = ([Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))).Trim()
-    if (-not $token) { Write-Host 'cckimi: no key entered, aborting.' -ForegroundColor Red; exit 1 }
-    Set-Content -Path $tf -Value $token -NoNewline -Encoding ascii
-    try { icacls $tf /inheritance:r /grant:r "${env:USERNAME}:(R,W)" | Out-Null } catch { }
-    Write-Host "cckimi: key saved to $tf (current-user only)." -ForegroundColor Green
-}
-$env:ANTHROPIC_BASE_URL = 'https://api.kimi.com/coding/'
-$env:ANTHROPIC_AUTH_TOKEN = $token
-$env:ANTHROPIC_MODEL = 'kimi-k3[1m]'
-$env:ANTHROPIC_DEFAULT_OPUS_MODEL = 'kimi-k3[1m]'
-$env:ANTHROPIC_DEFAULT_SONNET_MODEL = 'kimi-k3[1m]'
-$env:ANTHROPIC_DEFAULT_HAIKU_MODEL = 'kimi-k3[1m]'
-$env:ANTHROPIC_DEFAULT_FABLE_MODEL = 'kimi-k3[1m]'
-$env:CLAUDE_CODE_SUBAGENT_MODEL = 'kimi-k3[1m]'
-$env:ENABLE_TOOL_SEARCH = 'false'
-$env:CLAUDE_CODE_AUTO_COMPACT_WINDOW = '1048576'
-$env:CLAUDE_CODE_EFFORT_LEVEL = 'max'
-& claude --dangerously-skip-permissions --effort max @args
+        $cmds = [ordered]@{}
+        $cmds['claude-skip'] = @'
+@echo off
+claude --dangerously-skip-permissions --effort max %*
+'@
+        $cmds['ccskip'] = $cmds['claude-skip']
+        $cmds['codex-skip'] = @'
+@echo off
+codex --sandbox danger-full-access -c model_reasoning_effort=xhigh %*
+'@
+        $cmds['cxskip'] = $cmds['codex-skip']
+        $cmds['cckimi'] = @'
+@echo off
+setlocal
+set "TOKENFILE=%USERPROFILE%\.kimi_token"
+set "token="
+if exist "%TOKENFILE%" set /p token=<"%TOKENFILE%"
+if not "%token%"=="" goto :run
+set /p token=cckimi: no API key found. Enter your Kimi API key:
+if "%token%"=="" (
+    echo cckimi: no key entered, aborting.
+    exit /b 1
+)
+>"%TOKENFILE%" echo %token%
+icacls "%TOKENFILE%" /inheritance:r /grant:r "%USERNAME%:(R,W)" >nul 2>&1
+echo cckimi: key saved to %TOKENFILE% (current-user only).
+:run
+set "ANTHROPIC_BASE_URL=https://api.kimi.com/coding/"
+set "ANTHROPIC_AUTH_TOKEN=%token%"
+set "ANTHROPIC_MODEL=kimi-k3[1m]"
+set "ANTHROPIC_DEFAULT_OPUS_MODEL=kimi-k3[1m]"
+set "ANTHROPIC_DEFAULT_SONNET_MODEL=kimi-k3[1m]"
+set "ANTHROPIC_DEFAULT_HAIKU_MODEL=kimi-k3[1m]"
+set "ANTHROPIC_DEFAULT_FABLE_MODEL=kimi-k3[1m]"
+set "CLAUDE_CODE_SUBAGENT_MODEL=kimi-k3[1m]"
+set "ENABLE_TOOL_SEARCH=false"
+set "CLAUDE_CODE_AUTO_COMPACT_WINDOW=1048576"
+set "CLAUDE_CODE_EFFORT_LEVEL=max"
+call claude --dangerously-skip-permissions --effort max %*
+'@
+        $cmds['ccglm'] = @'
+@echo off
+setlocal
+set "TOKENFILE=%USERPROFILE%\.zai_token"
+set "token="
+if exist "%TOKENFILE%" set /p token=<"%TOKENFILE%"
+if not "%token%"=="" goto :run
+set /p token=ccglm: no API key found. Enter your Z.AI API key:
+if "%token%"=="" (
+    echo ccglm: no key entered, aborting.
+    exit /b 1
+)
+>"%TOKENFILE%" echo %token%
+icacls "%TOKENFILE%" /inheritance:r /grant:r "%USERNAME%:(R,W)" >nul 2>&1
+echo ccglm: key saved to %TOKENFILE% (current-user only).
+:run
+set "ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic"
+set "ANTHROPIC_AUTH_TOKEN=%token%"
+set "ANTHROPIC_MODEL=glm-5.2[1m]"
+set "ANTHROPIC_DEFAULT_OPUS_MODEL=glm-5.2[1m]"
+set "ANTHROPIC_DEFAULT_SONNET_MODEL=glm-5.2[1m]"
+set "ANTHROPIC_DEFAULT_HAIKU_MODEL=glm-5.2[1m]"
+set "ANTHROPIC_DEFAULT_FABLE_MODEL=glm-5.2[1m]"
+set "CLAUDE_CODE_SUBAGENT_MODEL=glm-5.2[1m]"
+set "CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000"
+set "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
+set "API_TIMEOUT_MS=3000000"
+call claude --dangerously-skip-permissions %*
+'@
+        $cmds['cckimi-token'] = @'
+@echo off
+setlocal
+set "TOKENFILE=%USERPROFILE%\.kimi_token"
+set "key=%~1"
+if "%key%"=="" set /p key=cckimi-token - paste API key:
+if "%key%"=="" (
+    echo cckimi-token: no key given.
+    exit /b 1
+)
+>"%TOKENFILE%" echo %key%
+icacls "%TOKENFILE%" /inheritance:r /grant:r "%USERNAME%:(R,W)" >nul 2>&1
+echo cckimi-token: key written to %TOKENFILE% (current-user only).
+'@
+        $cmds['ccglm-token'] = @'
+@echo off
+setlocal
+set "TOKENFILE=%USERPROFILE%\.zai_token"
+set "key=%~1"
+if "%key%"=="" set /p key=ccglm-token - paste API key:
+if "%key%"=="" (
+    echo ccglm-token: no key given.
+    exit /b 1
+)
+>"%TOKENFILE%" echo %key%
+icacls "%TOKENFILE%" /inheritance:r /grant:r "%USERNAME%:(R,W)" >nul 2>&1
+echo ccglm-token: key written to %TOKENFILE% (current-user only).
 '@
 
-        $ccglmPs = @'
-$tf = Join-Path $HOME '.zai_token'
-$token = ''
-if (Test-Path $tf) { $token = (Get-Content -Raw $tf -ErrorAction SilentlyContinue).Trim() }
-if (-not $token) {
-    $sec = Read-Host 'ccglm: no API key found. Enter your Z.AI API key' -AsSecureString
-    $token = ([Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))).Trim()
-    if (-not $token) { Write-Host 'ccglm: no key entered, aborting.' -ForegroundColor Red; exit 1 }
-    Set-Content -Path $tf -Value $token -NoNewline -Encoding ascii
-    try { icacls $tf /inheritance:r /grant:r "${env:USERNAME}:(R,W)" | Out-Null } catch { }
-    Write-Host "ccglm: key saved to $tf (current-user only)." -ForegroundColor Green
-}
-$env:ANTHROPIC_BASE_URL = 'https://api.z.ai/api/anthropic'
-$env:ANTHROPIC_AUTH_TOKEN = $token
-$env:ANTHROPIC_MODEL = 'glm-5.2[1m]'
-$env:ANTHROPIC_DEFAULT_OPUS_MODEL = 'glm-5.2[1m]'
-$env:ANTHROPIC_DEFAULT_SONNET_MODEL = 'glm-5.2[1m]'
-$env:ANTHROPIC_DEFAULT_HAIKU_MODEL = 'glm-5.2[1m]'
-$env:ANTHROPIC_DEFAULT_FABLE_MODEL = 'glm-5.2[1m]'
-$env:CLAUDE_CODE_SUBAGENT_MODEL = 'glm-5.2[1m]'
-$env:CLAUDE_CODE_AUTO_COMPACT_WINDOW = '1000000'
-$env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
-$env:API_TIMEOUT_MS = '3000000'
-& claude --dangerously-skip-permissions @args
-'@
-
-        $cckimiTokenPs = @'
-param([string]$Key)
-if (-not $Key) { $Key = Read-Host 'cckimi-token - paste API key' }
-$Key = ($Key -replace '\s', '')
-if (-not $Key) { Write-Host 'cckimi-token: no key given.' -ForegroundColor Yellow; exit 1 }
-$tf = Join-Path $HOME '.kimi_token'
-Set-Content -Path $tf -Value $Key -NoNewline -Encoding ascii
-try { icacls $tf /inheritance:r /grant:r "${env:USERNAME}:(R,W)" | Out-Null } catch { }
-Write-Host "cckimi-token: key written to $tf ($($Key.Length) chars, current-user only)." -ForegroundColor Green
-'@
-
-        $ccglmTokenPs = @'
-param([string]$Key)
-if (-not $Key) { $Key = Read-Host 'ccglm-token - paste API key' }
-$Key = ($Key -replace '\s', '')
-if (-not $Key) { Write-Host 'ccglm-token: no key given.' -ForegroundColor Yellow; exit 1 }
-$tf = Join-Path $HOME '.zai_token'
-Set-Content -Path $tf -Value $Key -NoNewline -Encoding ascii
-try { icacls $tf /inheritance:r /grant:r "${env:USERNAME}:(R,W)" | Out-Null } catch { }
-Write-Host "ccglm-token: key written to $tf ($($Key.Length) chars, current-user only)." -ForegroundColor Green
-'@
-
-        $scripts = [ordered]@{
-            'claude-skip'  = '& claude --dangerously-skip-permissions --effort max @args'
-            'ccskip'       = '& claude --dangerously-skip-permissions --effort max @args'
-            'codex-skip'   = "& codex --sandbox danger-full-access -c 'model_reasoning_effort=xhigh' @args"
-            'cxskip'       = "& codex --sandbox danger-full-access -c 'model_reasoning_effort=xhigh' @args"
-            'cckimi'       = $cckimiPs
-            'ccglm'        = $ccglmPs
-            'cckimi-token' = $cckimiTokenPs
-            'ccglm-token'  = $ccglmTokenPs
-        }
-
-        foreach ($name in $scripts.Keys) {
-            Set-Content -LiteralPath (Join-Path $aliasDir "$name.ps1") -Value $scripts[$name] -Encoding UTF8
-            $launcher = "@echo off`r`nwhere pwsh >nul 2>nul`r`nif %errorlevel%==0 (`r`n  pwsh -NoProfile -ExecutionPolicy Bypass -File `"%~dp0$name.ps1`" %*`r`n) else (`r`n  powershell -NoProfile -ExecutionPolicy Bypass -File `"%~dp0$name.ps1`" %*`r`n)`r`n"
-            Set-Content -LiteralPath (Join-Path $aliasDir "$name.cmd") -Value $launcher -Encoding ascii
+        foreach ($name in $cmds.Keys) {
+            # remove any leftover .ps1 from the previous (launcher+ps1) approach
+            Remove-Item -LiteralPath (Join-Path $aliasDir "$name.ps1") -Force -ErrorAction SilentlyContinue
+            # force CRLF + ASCII (no BOM) so cmd.exe handles labels/goto correctly
+            $body = ($cmds[$name] -replace "`r`n", "`n") -replace "`n", "`r`n"
+            if (-not $body.EndsWith("`r`n")) { $body += "`r`n" }
+            [System.IO.File]::WriteAllText((Join-Path $aliasDir "$name.cmd"), $body, [System.Text.Encoding]::ASCII)
         }
 
         # Add the aliases folder to the User PATH (persisted) + the current session.
         $userPath = [Environment]::GetEnvironmentVariable('Path', 'User'); if (-not $userPath) { $userPath = '' }
         if (($userPath -split ';') -notcontains $aliasDir) {
-            $newPath = if ($userPath.TrimEnd(';')) { $userPath.TrimEnd(';') + ';' + $aliasDir } else { $aliasDir }
+            $trimmed = $userPath.TrimEnd(';')
+            $newPath = if ($trimmed) { $trimmed + ';' + $aliasDir } else { $aliasDir }
             [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
         }
         $cur = [string]$env:Path
         if (($cur -split ';') -notcontains $aliasDir) { $env:Path = ($cur.TrimEnd(';') + ';' + $aliasDir).TrimStart(';') }
 
-        Write-LogSuccess "CLI aliases installed to $aliasDir and added to PATH: claude-skip, ccskip, cckimi, ccglm, cckimi-token, ccglm-token, codex-skip, cxskip (open a new terminal to use them)."
+        Write-LogSuccess "CLI aliases (.cmd) installed to $aliasDir and added to PATH: claude-skip, ccskip, cckimi, ccglm, cckimi-token, ccglm-token, codex-skip, cxskip (open a new terminal to use them)."
         return $true
     } catch {
         Write-LogWarning "Could not install CLI aliases: $($_.Exception.Message)"
