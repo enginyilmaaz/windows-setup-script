@@ -25,7 +25,7 @@
 #===============================================================================
 
 $script:SCRIPT_VERSION  = '1.2.1'
-$script:SCRIPT_REVISION = '9'
+$script:SCRIPT_REVISION = '10'
 $script:SCRIPT_DATE     = '2026-07-27'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -521,7 +521,7 @@ $script:WindowsTweaks = @(
     @{ Key='script-launcher';  Label='Script Launcher (right-click menu)';   Apply='Set-ScriptLauncherContextMenu' }
     @{ Key='openssh';          Label='OpenSSH Server';                       Apply='Enable-OpenSSHServer' }
     @{ Key='hostname';         Label='Change Hostname';                      Apply='Set-ComputerHostname'; NeedsInput='hostname' }
-    @{ Key='cli-aliases';      Label='CLI Aliases (claude-skip, cckimi, ccglm, codex-skip)'; Apply='Set-CliAliases' }
+    @{ Key='cli-aliases';      Label='CLI Aliases (cckimi, ccglm + token setters)'; Apply='Set-CliAliases' }
     @{ Key='screen-never-off'; Label='Screen Off: Never';                    Apply='Disable-ScreenTimeout' }
     @{ Key='show-hidden';      Label='Show Hidden Files + Extensions';       Apply='Show-HiddenFiles' }
     @{ Key='keyboard-tr-q';    Label='Keyboard: Turkish Q';                  Apply='Add-KeyboardTurkishQ' }
@@ -1905,11 +1905,11 @@ function Set-ComputerHostname {
     }
 }
 
-# CLI Aliases: install claude-skip / ccskip / cckimi / ccglm / *-token / codex-skip /
-# cxskip as standalone .cmd commands under %USERPROFILE%\apps\aliases and add that
-# folder to PATH, so they work from ANY shell (cmd, PowerShell, Run). Pure batch, one
-# self-contained .cmd each - no .ps1. Env vars are scoped via setlocal to that cmd
-# process, so they don't leak into the caller. Mirrors setup_cli_shortcuts.
+# CLI Aliases: install cckimi / ccglm (Claude Code on the Kimi / Z.AI-GLM backends) plus
+# cckimi-token / ccglm-token as standalone .cmd commands under %USERPROFILE%\apps\aliases
+# and add that folder to PATH, so they work from ANY shell (cmd, PowerShell, Run). Pure
+# batch, one self-contained .cmd each - no .ps1. Env vars are scoped via setlocal to that
+# cmd process, so they don't leak into the caller. Mirrors setup_cli_shortcuts.
 function Set-CliAliases {
     $aliasDir = Join-Path $env:USERPROFILE 'apps\aliases'
     Write-LogInfo "Installing CLI alias .cmd commands into $aliasDir and adding it to PATH..."
@@ -1927,16 +1927,6 @@ function Set-CliAliases {
         }
 
         $cmds = [ordered]@{}
-        $cmds['claude-skip'] = @'
-@echo off
-claude --dangerously-skip-permissions --effort max %*
-'@
-        $cmds['ccskip'] = $cmds['claude-skip']
-        $cmds['codex-skip'] = @'
-@echo off
-codex --sandbox danger-full-access -c model_reasoning_effort=xhigh %*
-'@
-        $cmds['cxskip'] = $cmds['codex-skip']
         $cmds['cckimi'] = @'
 @echo off
 setlocal
@@ -2024,9 +2014,14 @@ icacls "%TOKENFILE%" /inheritance:r /grant:r "%USERNAME%:(R,W)" >nul 2>&1
 echo ccglm-token: key written to %TOKENFILE% (current-user only).
 '@
 
+        # Remove every alias we have ever managed (obsolete claude-skip / ccskip / codex-skip /
+        # cxskip, plus any leftover .ps1 from the old approach), then write the current set.
+        $managed = @('claude-skip', 'ccskip', 'codex-skip', 'cxskip', 'cckimi', 'ccglm', 'cckimi-token', 'ccglm-token')
+        foreach ($n in $managed) {
+            Remove-Item -LiteralPath (Join-Path $aliasDir "$n.cmd") -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath (Join-Path $aliasDir "$n.ps1") -Force -ErrorAction SilentlyContinue
+        }
         foreach ($name in $cmds.Keys) {
-            # remove any leftover .ps1 from the previous (launcher+ps1) approach
-            Remove-Item -LiteralPath (Join-Path $aliasDir "$name.ps1") -Force -ErrorAction SilentlyContinue
             # force CRLF + ASCII (no BOM) so cmd.exe handles labels/goto correctly
             $body = ($cmds[$name] -replace "`r`n", "`n") -replace "`n", "`r`n"
             if (-not $body.EndsWith("`r`n")) { $body += "`r`n" }
@@ -2043,7 +2038,7 @@ echo ccglm-token: key written to %TOKENFILE% (current-user only).
         $cur = [string]$env:Path
         if (($cur -split ';') -notcontains $aliasDir) { $env:Path = ($cur.TrimEnd(';') + ';' + $aliasDir).TrimStart(';') }
 
-        Write-LogSuccess "CLI aliases (.cmd) installed to $aliasDir and added to PATH: claude-skip, ccskip, cckimi, ccglm, cckimi-token, ccglm-token, codex-skip, cxskip (open a new terminal to use them)."
+        Write-LogSuccess "CLI aliases (.cmd) installed to $aliasDir and added to PATH: cckimi, ccglm, cckimi-token, ccglm-token (open a new terminal to use them)."
         return $true
     } catch {
         Write-LogWarning "Could not install CLI aliases: $($_.Exception.Message)"
