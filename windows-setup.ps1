@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.4.0'
-$script:SCRIPT_REVISION = '15'
+$script:SCRIPT_VERSION  = '1.4.1'
+$script:SCRIPT_REVISION = '16'
 $script:SCRIPT_DATE     = '2026-07-27'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -2024,6 +2024,31 @@ function Test-AliasInstalled {
     return (Test-Path -LiteralPath (Join-Path (Join-Path $env:USERPROFILE 'apps\aliases') "$Key.cmd"))
 }
 
+# Remove EVERY copy of an alias command: the in-session function/alias, plus files named
+# <name> or <name>.cmd/.bat/.ps1 in ANY PATH directory (also ~/.local/bin & apps\aliases).
+# It never touches .exe, so real binaries (e.g. the 'claude' executable) are safe.
+function Remove-AliasEverywhere {
+    param([string]$Name)
+    Remove-Item -LiteralPath ('function:\' + $Name) -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath ('alias:\' + $Name) -Force -ErrorAction SilentlyContinue
+    $dirs = New-Object System.Collections.Generic.List[string]
+    foreach ($d in ([string]$env:Path -split ';')) { if ($d) { [void]$dirs.Add($d) } }
+    if ($env:USERPROFILE) {
+        [void]$dirs.Add((Join-Path $env:USERPROFILE '.local\bin'))
+        [void]$dirs.Add((Join-Path $env:USERPROFILE 'apps\aliases'))
+    }
+    $seen = @{}
+    foreach ($d in $dirs) {
+        $key = ($d.TrimEnd('\')).ToLower()
+        if ($seen.ContainsKey($key)) { continue }
+        $seen[$key] = $true
+        foreach ($ext in @('', '.cmd', '.bat', '.ps1')) {
+            $p = Join-Path $d ($Name + $ext)
+            if (Test-Path -LiteralPath $p -PathType Leaf) { Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue }
+        }
+    }
+}
+
 # CLI Aliases: install ccskip / cxskip / cckimi / ccglm (Claude/Codex helpers) plus
 # cckimi-token / ccglm-token as standalone .cmd commands under %USERPROFILE%\apps\aliases
 # and add that folder to PATH, so they work from ANY shell (cmd, PowerShell, Run). Pure
@@ -2149,31 +2174,13 @@ echo ccglm-token: key written to %TOKENFILE% (current-user only).
         if ($install['cckimi']) { $install['cckimi-token'] = $true }   # cckimi -> also cckimi-token
         if ($install['ccglm'])  { $install['ccglm-token']  = $true }   # ccglm  -> also ccglm-token
 
-        # Discontinued aliases we no longer ship: drop their leftover files.
-        foreach ($n in @('claude-skip', 'codex-skip')) {
-            Remove-Item -LiteralPath (Join-Path $aliasDir "$n.cmd") -Force -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath (Join-Path $aliasDir "$n.ps1") -Force -ErrorAction SilentlyContinue
-        }
-        # For every managed alias: remove any existing copy (Get-Command -All: a .cmd/.bat/.ps1
-        # on PATH or an in-session function/alias, + our folder copies), then (re)write ONLY the
-        # ones in the install set. Deselected ones therefore get uninstalled.
+        # Remove discontinued aliases everywhere (all PATH dirs incl. ~/.local/bin + session).
+        foreach ($n in @('claude-skip', 'codex-skip')) { Remove-AliasEverywhere $n }
+        # For every managed alias: remove EVERY existing copy (any PATH dir, extensionless or
+        # .cmd/.bat/.ps1, + session fn/alias), then (re)write ONLY the ones in the install set.
+        # Deselected ones therefore get uninstalled.
         foreach ($name in $cmds.Keys) {
-            foreach ($g in @(Get-Command $name -All -ErrorAction SilentlyContinue)) {
-                if ($g.CommandType -eq 'Application') {
-                    if ($g.Source -and (Test-Path -LiteralPath $g.Source)) {
-                        $ext = ([System.IO.Path]::GetExtension($g.Source)).ToLower()
-                        if ($ext -eq '.cmd' -or $ext -eq '.bat' -or $ext -eq '.ps1') {
-                            Remove-Item -LiteralPath $g.Source -Force -ErrorAction SilentlyContinue
-                        }
-                    }
-                } elseif ($g.CommandType -eq 'Function') {
-                    Remove-Item -LiteralPath ('function:\' + $name) -Force -ErrorAction SilentlyContinue
-                } elseif ($g.CommandType -eq 'Alias') {
-                    Remove-Item -LiteralPath ('alias:\' + $name) -Force -ErrorAction SilentlyContinue
-                }
-            }
-            Remove-Item -LiteralPath (Join-Path $aliasDir "$name.cmd") -Force -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath (Join-Path $aliasDir "$name.ps1") -Force -ErrorAction SilentlyContinue
+            Remove-AliasEverywhere $name
             if ($install[$name]) {
                 # Write fresh (CRLF + ASCII, no BOM) so cmd.exe handles labels/goto correctly.
                 $body = ($cmds[$name] -replace "`r`n", "`n") -replace "`n", "`r`n"
