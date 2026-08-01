@@ -25,7 +25,7 @@
 #===============================================================================
 
 $script:SCRIPT_VERSION  = '1.2.1'
-$script:SCRIPT_REVISION = '10'
+$script:SCRIPT_REVISION = '11'
 $script:SCRIPT_DATE     = '2026-07-27'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -521,7 +521,7 @@ $script:WindowsTweaks = @(
     @{ Key='script-launcher';  Label='Script Launcher (right-click menu)';   Apply='Set-ScriptLauncherContextMenu' }
     @{ Key='openssh';          Label='OpenSSH Server';                       Apply='Enable-OpenSSHServer' }
     @{ Key='hostname';         Label='Change Hostname';                      Apply='Set-ComputerHostname'; NeedsInput='hostname' }
-    @{ Key='cli-aliases';      Label='CLI Aliases (cckimi, ccglm + token setters)'; Apply='Set-CliAliases' }
+    @{ Key='cli-aliases';      Label='CLI Aliases (ccskip, cxskip, cckimi, ccglm + tokens)'; Apply='Set-CliAliases' }
     @{ Key='screen-never-off'; Label='Screen Off: Never';                    Apply='Disable-ScreenTimeout' }
     @{ Key='show-hidden';      Label='Show Hidden Files + Extensions';       Apply='Show-HiddenFiles' }
     @{ Key='keyboard-tr-q';    Label='Keyboard: Turkish Q';                  Apply='Add-KeyboardTurkishQ' }
@@ -1905,7 +1905,7 @@ function Set-ComputerHostname {
     }
 }
 
-# CLI Aliases: install cckimi / ccglm (Claude Code on the Kimi / Z.AI-GLM backends) plus
+# CLI Aliases: install ccskip / cxskip / cckimi / ccglm (Claude/Codex helpers) plus
 # cckimi-token / ccglm-token as standalone .cmd commands under %USERPROFILE%\apps\aliases
 # and add that folder to PATH, so they work from ANY shell (cmd, PowerShell, Run). Pure
 # batch, one self-contained .cmd each - no .ps1. Env vars are scoped via setlocal to that
@@ -1927,6 +1927,14 @@ function Set-CliAliases {
         }
 
         $cmds = [ordered]@{}
+        $cmds['ccskip'] = @'
+@echo off
+claude --dangerously-skip-permissions --effort max %*
+'@
+        $cmds['cxskip'] = @'
+@echo off
+codex --sandbox danger-full-access -c model_reasoning_effort=xhigh %*
+'@
         $cmds['cckimi'] = @'
 @echo off
 setlocal
@@ -2038,7 +2046,7 @@ echo ccglm-token: key written to %TOKENFILE% (current-user only).
         $cur = [string]$env:Path
         if (($cur -split ';') -notcontains $aliasDir) { $env:Path = ($cur.TrimEnd(';') + ';' + $aliasDir).TrimStart(';') }
 
-        Write-LogSuccess "CLI aliases (.cmd) installed to $aliasDir and added to PATH: cckimi, ccglm, cckimi-token, ccglm-token (open a new terminal to use them)."
+        Write-LogSuccess "CLI aliases (.cmd) installed to $aliasDir and added to PATH: ccskip, cxskip, cckimi, ccglm, cckimi-token, ccglm-token (open a new terminal to use them)."
         return $true
     } catch {
         Write-LogWarning "Could not install CLI aliases: $($_.Exception.Message)"
