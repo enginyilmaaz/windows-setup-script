@@ -25,7 +25,7 @@
 #===============================================================================
 
 $script:SCRIPT_VERSION  = '1.3.0'
-$script:SCRIPT_REVISION = '12'
+$script:SCRIPT_REVISION = '13'
 $script:SCRIPT_DATE     = '2026-07-27'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -2127,15 +2127,33 @@ icacls "%TOKENFILE%" /inheritance:r /grant:r "%USERNAME%:(R,W)" >nul 2>&1
 echo ccglm-token: key written to %TOKENFILE% (current-user only).
 '@
 
-        # Remove every alias we have ever managed (obsolete claude-skip / ccskip / codex-skip /
-        # cxskip, plus any leftover .ps1 from the old approach), then write the current set.
-        $managed = @('claude-skip', 'ccskip', 'codex-skip', 'cxskip', 'cckimi', 'ccglm', 'cckimi-token', 'ccglm-token')
-        foreach ($n in $managed) {
+        # Discontinued aliases we no longer ship: drop their leftover files.
+        foreach ($n in @('claude-skip', 'codex-skip')) {
             Remove-Item -LiteralPath (Join-Path $aliasDir "$n.cmd") -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath (Join-Path $aliasDir "$n.ps1") -Force -ErrorAction SilentlyContinue
         }
         foreach ($name in $cmds.Keys) {
-            # force CRLF + ASCII (no BOM) so cmd.exe handles labels/goto correctly
+            # Clean BEFORE installing (only for the aliases we are about to install):
+            # find EVERY existing copy of this name via Get-Command -All - a .cmd/.bat/.ps1
+            # anywhere on PATH, or an in-session function/alias - and remove it.
+            foreach ($g in @(Get-Command $name -All -ErrorAction SilentlyContinue)) {
+                if ($g.CommandType -eq 'Application') {
+                    if ($g.Source -and (Test-Path -LiteralPath $g.Source)) {
+                        $ext = ([System.IO.Path]::GetExtension($g.Source)).ToLower()
+                        if ($ext -eq '.cmd' -or $ext -eq '.bat' -or $ext -eq '.ps1') {
+                            Remove-Item -LiteralPath $g.Source -Force -ErrorAction SilentlyContinue
+                        }
+                    }
+                } elseif ($g.CommandType -eq 'Function') {
+                    Remove-Item -LiteralPath ('function:\' + $name) -Force -ErrorAction SilentlyContinue
+                } elseif ($g.CommandType -eq 'Alias') {
+                    Remove-Item -LiteralPath ('alias:\' + $name) -Force -ErrorAction SilentlyContinue
+                }
+            }
+            # PATH may not be refreshed yet, so also remove our own folder copies directly.
+            Remove-Item -LiteralPath (Join-Path $aliasDir "$name.cmd") -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath (Join-Path $aliasDir "$name.ps1") -Force -ErrorAction SilentlyContinue
+            # Write fresh (CRLF + ASCII, no BOM) so cmd.exe handles labels/goto correctly.
             $body = ($cmds[$name] -replace "`r`n", "`n") -replace "`n", "`r`n"
             if (-not $body.EndsWith("`r`n")) { $body += "`r`n" }
             [System.IO.File]::WriteAllText((Join-Path $aliasDir "$name.cmd"), $body, [System.Text.Encoding]::ASCII)
