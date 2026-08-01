@@ -25,7 +25,7 @@
 #===============================================================================
 
 $script:SCRIPT_VERSION  = '1.5.0'
-$script:SCRIPT_REVISION = '17'
+$script:SCRIPT_REVISION = '18'
 $script:SCRIPT_DATE     = '2026-07-27'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -3121,17 +3121,23 @@ function Show-VSCodeSubmenu {
 function Show-InteractiveMenu {
     Reset-DetectionCache
     Write-Host ""
-    Write-Host "  Scanning installed software..." -ForegroundColor DarkGray
 
     $dev = @{}
     foreach ($d in $script:DevTools) { $dev[$d.Key] = $d }
 
-    # Precompute group markers ONCE (detection is slow)
+    # Precompute group markers ONCE (detection is slow). Animate an aligned status line
+    # (starts at column 0 via `r) whose dots cycle as each detection step completes.
+    Write-Host "`rScanning installed software.    " -NoNewline -ForegroundColor DarkGray
     $rmInst = @($script:RemoteTools  | Where-Object { & $_.Detect }).Count
+    Write-Host "`rScanning installed software..   " -NoNewline -ForegroundColor DarkGray
     $aiInst = @($script:AiCliTools   | Where-Object { & $_.Detect }).Count
+    Write-Host "`rScanning installed software...  " -NoNewline -ForegroundColor DarkGray
     $twInst = @($script:WindowsTweaks| Where-Object { Test-TweakApplied -Key $_.Key }).Count
+    Write-Host "`rScanning installed software.    " -NoNewline -ForegroundColor DarkGray
     $dbInst = @($script:DebloatItems | Where-Object { Test-BloatRemoved -Item $_ }).Count
+    Write-Host "`rScanning installed software..   " -NoNewline -ForegroundColor DarkGray
     $vsInst = if (Test-VSCodeInstalled) { 'installed' } else { '' }
+    Write-Host ("`r" + (' ' * 40) + "`r") -NoNewline   # clear the status line before the menu draws
 
     # Birebir order + descriptions
     $order = @(
