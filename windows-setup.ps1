@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.5.0'
-$script:SCRIPT_REVISION = '18'
+$script:SCRIPT_VERSION  = '1.5.1'
+$script:SCRIPT_REVISION = '19'
 $script:SCRIPT_DATE     = '2026-07-27'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -2167,7 +2167,6 @@ echo ccglm-token: key written to %TOKENFILE% (current-user only).
 '@
 
         # Build the install set from the SELECTED aliases; auto-bundle the *-token setters.
-        # (Empty selection => install set is empty => every managed alias gets removed.)
         $sel = @($script:SelectedAliases)
         $install = @{}
         foreach ($k in $sel) { if ($cmds.Contains($k)) { $install[$k] = $true } }
@@ -2187,19 +2186,17 @@ echo ccglm-token: key written to %TOKENFILE% (current-user only).
 
         # Remove discontinued aliases everywhere (all PATH dirs incl. ~/.local/bin + session).
         foreach ($n in @('claude-skip', 'codex-skip')) { Remove-AliasEverywhere $n }
-        # For every managed alias: remove EVERY existing copy (any PATH dir, extensionless or
-        # .cmd/.bat/.ps1, + session fn/alias), then (re)write ONLY the ones in the install set.
-        # Deselected ones therefore get uninstalled.
+        # Install-action model: only the SELECTED aliases are (re)installed. Non-selected ones
+        # are left untouched (checking installs; the marker just shows what's already installed).
         foreach ($name in $cmds.Keys) {
-            # Already installed + user declined overwrite -> leave that alias untouched.
-            if ($install[$name] -and -not $overwrite -and (Test-AliasInstalled $name)) { continue }
-            Remove-AliasEverywhere $name
-            if ($install[$name]) {
-                # Write fresh (CRLF + ASCII, no BOM) so cmd.exe handles labels/goto correctly.
-                $body = ($cmds[$name] -replace "`r`n", "`n") -replace "`n", "`r`n"
-                if (-not $body.EndsWith("`r`n")) { $body += "`r`n" }
-                [System.IO.File]::WriteAllText((Join-Path $aliasDir "$name.cmd"), $body, [System.Text.Encoding]::ASCII)
-            }
+            if (-not $install[$name]) { continue }
+            # Already installed + user declined overwrite -> keep the existing copy.
+            if (-not $overwrite -and (Test-AliasInstalled $name)) { continue }
+            Remove-AliasEverywhere $name   # clean any straggler copies (incl ~/.local/bin) first
+            # Write fresh (CRLF + ASCII, no BOM) so cmd.exe handles labels/goto correctly.
+            $body = ($cmds[$name] -replace "`r`n", "`n") -replace "`n", "`r`n"
+            if (-not $body.EndsWith("`r`n")) { $body += "`r`n" }
+            [System.IO.File]::WriteAllText((Join-Path $aliasDir "$name.cmd"), $body, [System.Text.Encoding]::ASCII)
         }
 
         # Add the aliases folder to the User PATH (persisted) + the current session.
@@ -2831,6 +2828,47 @@ $script:_MainRows           = $null
 
 function Set-MenuCursorVisible { param([bool]$Visible) try { [System.Console]::CursorVisible = $Visible } catch { } }
 
+# Smooth spinner: a background runspace animates "<Text>. .. ..." on the current line
+# (via `r, so it stays aligned at column 0) while the main thread does slow work.
+# The worker only touches [System.Console]::Write; the caller must stay silent meanwhile.
+function Start-Spinner {
+    param([string]$Text = 'Working')
+    try {
+        $sync = [hashtable]::Synchronized(@{ Stop = $false })
+        $psr = [powershell]::Create()
+        [void]$psr.AddScript({
+            param($sync, $text)
+            try { [System.Console]::CursorVisible = $false } catch { }
+            $frames = @('.  ', '.. ', '...')
+            $i = 0
+            while (-not $sync.Stop) {
+                try { [System.Console]::Write("`r" + $text + $frames[$i % $frames.Length]) } catch { }
+                Start-Sleep -Milliseconds 120
+                $i++
+            }
+        })
+        [void]$psr.AddArgument($sync)
+        [void]$psr.AddArgument($Text)
+        $handle = $psr.BeginInvoke()
+        return @{ Ps = $psr; Handle = $handle; Sync = $sync; Width = ($Text.Length + 6) }
+    } catch {
+        # Runspaces unavailable: fall back to a plain static line.
+        try { [System.Console]::Write("`r" + $Text + '...') } catch { }
+        return $null
+    }
+}
+
+function Stop-Spinner {
+    param($Spinner)
+    if ($Spinner) {
+        try { $Spinner.Sync.Stop = $true } catch { }
+        try { [void]$Spinner.Ps.EndInvoke($Spinner.Handle) } catch { }
+        try { $Spinner.Ps.Dispose() } catch { }
+    }
+    try { [System.Console]::Write("`r" + (' ' * 44) + "`r") } catch { }
+    Set-MenuCursorVisible $true
+}
+
 # Group marker text (mirrors group_marker): "" / "<word>" / "<inst>/<total> <word>"
 function Get-GroupMarkerText {
     param([int]$Installed, [int]$Total, [string]$Word)
@@ -3067,9 +3105,9 @@ function Show-TweaksSubmenu {
     # CLI aliases - individually selectable here; cckimi/ccglm auto-add their -token setter.
     foreach ($a in $script:CliAliases) {
         $n++
-        $inst = Test-AliasInstalled $a.Key
-        $mk = if ($inst) { 'installed' } else { '' }
-        $sel = ($script:SelectedAliases -contains $a.Key) -or $inst
+        $mk = if (Test-AliasInstalled $a.Key) { 'installed' } else { '' }
+        # Default UNCHECKED (like the tweaks): the marker shows what's installed; checking = (re)install.
+        $sel = ($script:SelectedAliases -contains $a.Key)
         [void]$rows.Add(@{ Num = $n; Label = ('CLI alias: ' + $a.Label); Desc = ''; Marker = $mk; Selected = $sel; IsGroup = $false; OnEnter = $null; Kind = 'alias'; Ref = $a })
     }
     if ((Invoke-SelectMenu -Banner 'Windows Tweaks + CLI Aliases' -Rows $rows) -eq 'confirm') {
@@ -3125,19 +3163,14 @@ function Show-InteractiveMenu {
     $dev = @{}
     foreach ($d in $script:DevTools) { $dev[$d.Key] = $d }
 
-    # Precompute group markers ONCE (detection is slow). Animate an aligned status line
-    # (starts at column 0 via `r) whose dots cycle as each detection step completes.
-    Write-Host "`rScanning installed software.    " -NoNewline -ForegroundColor DarkGray
+    # Precompute group markers ONCE (detection is slow) with a smooth background spinner.
+    $sp = Start-Spinner 'Scanning installed software'
     $rmInst = @($script:RemoteTools  | Where-Object { & $_.Detect }).Count
-    Write-Host "`rScanning installed software..   " -NoNewline -ForegroundColor DarkGray
     $aiInst = @($script:AiCliTools   | Where-Object { & $_.Detect }).Count
-    Write-Host "`rScanning installed software...  " -NoNewline -ForegroundColor DarkGray
     $twInst = @($script:WindowsTweaks| Where-Object { Test-TweakApplied -Key $_.Key }).Count
-    Write-Host "`rScanning installed software.    " -NoNewline -ForegroundColor DarkGray
     $dbInst = @($script:DebloatItems | Where-Object { Test-BloatRemoved -Item $_ }).Count
-    Write-Host "`rScanning installed software..   " -NoNewline -ForegroundColor DarkGray
     $vsInst = if (Test-VSCodeInstalled) { 'installed' } else { '' }
-    Write-Host ("`r" + (' ' * 40) + "`r") -NoNewline   # clear the status line before the menu draws
+    Stop-Spinner $sp
 
     # Birebir order + descriptions
     $order = @(
@@ -3325,8 +3358,8 @@ function Invoke-Installations {
         Invoke-Debloat
     }
 
-    # CLI aliases (own menu group) - install selected + auto-bundled tokens, remove deselected
-    if ($script:AliasesTouched -or ($script:SelectedAliases -and $script:SelectedAliases.Count -gt 0)) {
+    # CLI aliases - install the selected ones (+ auto-bundled tokens). Non-selected untouched.
+    if ($script:SelectedAliases -and $script:SelectedAliases.Count -gt 0) {
         Set-CliAliases | Out-Null
     }
 
