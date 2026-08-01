@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.5.1'
-$script:SCRIPT_REVISION = '19'
+$script:SCRIPT_VERSION  = '1.5.2'
+$script:SCRIPT_REVISION = '20'
 $script:SCRIPT_DATE     = '2026-07-27'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -3360,7 +3360,7 @@ function Invoke-Installations {
 
     # CLI aliases - install the selected ones (+ auto-bundled tokens). Non-selected untouched.
     if ($script:SelectedAliases -and $script:SelectedAliases.Count -gt 0) {
-        Set-CliAliases | Out-Null
+        if (Set-CliAliases) { Add-Summary ("CLI aliases: " + (@($script:SelectedAliases) -join ', ')) }
     }
 
     Show-Summary
