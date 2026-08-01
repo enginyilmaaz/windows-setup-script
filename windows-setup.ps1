@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.3.0'
-$script:SCRIPT_REVISION = '13'
+$script:SCRIPT_VERSION  = '1.4.0'
+$script:SCRIPT_REVISION = '14'
 $script:SCRIPT_DATE     = '2026-07-27'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -521,7 +521,6 @@ $script:WindowsTweaks = @(
     @{ Key='script-launcher';  Label='Script Launcher (right-click menu)';   Apply='Set-ScriptLauncherContextMenu' }
     @{ Key='openssh';          Label='OpenSSH Server';                       Apply='Enable-OpenSSHServer' }
     @{ Key='hostname';         Label='Change Hostname';                      Apply='Set-ComputerHostname'; NeedsInput='hostname' }
-    @{ Key='cli-aliases';      Label='CLI Aliases (ccskip, cxskip, cckimi, ccglm + tokens)'; Apply='Set-CliAliases' }
     @{ Key='screen-never-off'; Label='Screen Off: Never';                    Apply='Disable-ScreenTimeout' }
     @{ Key='show-hidden';      Label='Show Hidden Files + Extensions';       Apply='Show-HiddenFiles' }
     @{ Key='keyboard-tr-q';    Label='Keyboard: Turkish Q';                  Apply='Add-KeyboardTurkishQ' }
@@ -536,6 +535,14 @@ $script:WindowsTweaks = @(
     # Node.js switch tweaks - shown conditionally (ShowIf) based on current state
     @{ Key='switch-node-nvm';    Label='Node.js: switch to NVM';              Apply='Switch-NodeToNvm';    ShowIf='Test-NodeIsNonNvm' }
     @{ Key='switch-node-native'; Label='Node.js: switch to native (non-NVM)'; Apply='Switch-NodeToNative'; ShowIf='Test-NvmInstalled' }
+)
+
+# CLI aliases (own submenu group). cckimi/ccglm auto-bundle their *-token setter.
+$script:CliAliases = @(
+    @{ Key='ccskip'; Label='ccskip  (claude --dangerously-skip-permissions --effort max)' }
+    @{ Key='cxskip'; Label='cxskip  (codex --sandbox danger-full-access ...)' }
+    @{ Key='cckimi'; Label='cckimi  (Claude Code on the Kimi backend)  [+ cckimi-token]' }
+    @{ Key='ccglm';  Label='ccglm   (Claude Code on the Z.AI GLM backend)  [+ ccglm-token]' }
 )
 
 # VS Code extensions (VS Code submenu) — IDs mirror the source install_vscode_extensions
@@ -2010,6 +2017,13 @@ function Set-ComputerHostname {
     }
 }
 
+# Is a given alias currently installed? (its .cmd exists in the aliases folder)
+function Test-AliasInstalled {
+    param([string]$Key)
+    if (-not $env:USERPROFILE) { return $false }
+    return (Test-Path -LiteralPath (Join-Path (Join-Path $env:USERPROFILE 'apps\aliases') "$Key.cmd"))
+}
+
 # CLI Aliases: install ccskip / cxskip / cckimi / ccglm (Claude/Codex helpers) plus
 # cckimi-token / ccglm-token as standalone .cmd commands under %USERPROFILE%\apps\aliases
 # and add that folder to PATH, so they work from ANY shell (cmd, PowerShell, Run). Pure
@@ -2127,15 +2141,23 @@ icacls "%TOKENFILE%" /inheritance:r /grant:r "%USERNAME%:(R,W)" >nul 2>&1
 echo ccglm-token: key written to %TOKENFILE% (current-user only).
 '@
 
+        # Build the install set from the SELECTED aliases; auto-bundle the *-token setters.
+        # (Empty selection => install set is empty => every managed alias gets removed.)
+        $sel = @($script:SelectedAliases)
+        $install = @{}
+        foreach ($k in $sel) { if ($cmds.Contains($k)) { $install[$k] = $true } }
+        if ($install['cckimi']) { $install['cckimi-token'] = $true }   # cckimi -> also cckimi-token
+        if ($install['ccglm'])  { $install['ccglm-token']  = $true }   # ccglm  -> also ccglm-token
+
         # Discontinued aliases we no longer ship: drop their leftover files.
         foreach ($n in @('claude-skip', 'codex-skip')) {
             Remove-Item -LiteralPath (Join-Path $aliasDir "$n.cmd") -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath (Join-Path $aliasDir "$n.ps1") -Force -ErrorAction SilentlyContinue
         }
+        # For every managed alias: remove any existing copy (Get-Command -All: a .cmd/.bat/.ps1
+        # on PATH or an in-session function/alias, + our folder copies), then (re)write ONLY the
+        # ones in the install set. Deselected ones therefore get uninstalled.
         foreach ($name in $cmds.Keys) {
-            # Clean BEFORE installing (only for the aliases we are about to install):
-            # find EVERY existing copy of this name via Get-Command -All - a .cmd/.bat/.ps1
-            # anywhere on PATH, or an in-session function/alias - and remove it.
             foreach ($g in @(Get-Command $name -All -ErrorAction SilentlyContinue)) {
                 if ($g.CommandType -eq 'Application') {
                     if ($g.Source -and (Test-Path -LiteralPath $g.Source)) {
@@ -2150,13 +2172,14 @@ echo ccglm-token: key written to %TOKENFILE% (current-user only).
                     Remove-Item -LiteralPath ('alias:\' + $name) -Force -ErrorAction SilentlyContinue
                 }
             }
-            # PATH may not be refreshed yet, so also remove our own folder copies directly.
             Remove-Item -LiteralPath (Join-Path $aliasDir "$name.cmd") -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath (Join-Path $aliasDir "$name.ps1") -Force -ErrorAction SilentlyContinue
-            # Write fresh (CRLF + ASCII, no BOM) so cmd.exe handles labels/goto correctly.
-            $body = ($cmds[$name] -replace "`r`n", "`n") -replace "`n", "`r`n"
-            if (-not $body.EndsWith("`r`n")) { $body += "`r`n" }
-            [System.IO.File]::WriteAllText((Join-Path $aliasDir "$name.cmd"), $body, [System.Text.Encoding]::ASCII)
+            if ($install[$name]) {
+                # Write fresh (CRLF + ASCII, no BOM) so cmd.exe handles labels/goto correctly.
+                $body = ($cmds[$name] -replace "`r`n", "`n") -replace "`n", "`r`n"
+                if (-not $body.EndsWith("`r`n")) { $body += "`r`n" }
+                [System.IO.File]::WriteAllText((Join-Path $aliasDir "$name.cmd"), $body, [System.Text.Encoding]::ASCII)
+            }
         }
 
         # Add the aliases folder to the User PATH (persisted) + the current session.
@@ -2169,7 +2192,8 @@ echo ccglm-token: key written to %TOKENFILE% (current-user only).
         $cur = [string]$env:Path
         if (($cur -split ';') -notcontains $aliasDir) { $env:Path = ($cur.TrimEnd(';') + ';' + $aliasDir).TrimStart(';') }
 
-        Write-LogSuccess "CLI aliases (.cmd) installed to $aliasDir and added to PATH: ccskip, cxskip, cckimi, ccglm, cckimi-token, ccglm-token (open a new terminal to use them)."
+        $installed = @($cmds.Keys | Where-Object { $install[$_] })
+        Write-LogSuccess ("CLI aliases (.cmd) installed to $aliasDir and added to PATH: {0} (open a new terminal to use them)." -f ($installed -join ', '))
         return $true
     } catch {
         Write-LogWarning "Could not install CLI aliases: $($_.Exception.Message)"
@@ -2779,6 +2803,8 @@ function Test-EdgeRemoved {
 $script:SelectedTweaks      = @()
 $script:SelectedDebloat     = @()
 $script:SelectedVSCodeExt   = @()
+$script:SelectedAliases     = @()
+$script:AliasesTouched      = $false
 $script:VSCodeApplySettings = $true
 $script:HostnameValue       = $null
 $script:_MainRows           = $null
@@ -2837,6 +2863,53 @@ function Get-HeaderLines {
 #   Row fields: Num, Label, Desc, Marker, Selected, IsGroup, OnEnter,
 #               SelectedCheck (optional scriptblock -> bool for derived rows)
 #-------------------------------------------------------------------------------
+# ANSI SGR color codes (ConsoleColor name -> code) for the single-write renderer.
+$script:_ansi = @{ Cyan = '36'; Green = '32'; Yellow = '33'; Blue = '34'; Gray = '37'; DarkGray = '90'; White = '97'; Red = '31' }
+$script:_vtEnabled = $null
+
+# Enable the console's virtual-terminal processing (so ANSI escapes render). Cached.
+function Enable-VirtualTerminal {
+    if ($null -ne $script:_vtEnabled) { return $script:_vtEnabled }
+    $script:_vtEnabled = $false
+    try {
+        if (-not ([System.Management.Automation.PSTypeName]'WsVt.Kernel').Type) {
+            Add-Type -Namespace WsVt -Name Kernel -MemberDefinition @'
+[DllImport("kernel32.dll", SetLastError=true)] public static extern System.IntPtr GetStdHandle(int n);
+[DllImport("kernel32.dll", SetLastError=true)] public static extern bool GetConsoleMode(System.IntPtr h, out uint m);
+[DllImport("kernel32.dll", SetLastError=true)] public static extern bool SetConsoleMode(System.IntPtr h, uint m);
+'@ -ErrorAction Stop
+        }
+        $h = [WsVt.Kernel]::GetStdHandle(-11)   # STD_OUTPUT_HANDLE
+        $m = [uint32]0
+        if ([WsVt.Kernel]::GetConsoleMode($h, [ref]$m)) {
+            $script:_vtEnabled = [WsVt.Kernel]::SetConsoleMode($h, ($m -bor 0x0004))  # ENABLE_VIRTUAL_TERMINAL_PROCESSING
+        }
+    } catch { $script:_vtEnabled = $false }
+    return $script:_vtEnabled
+}
+
+# Render one line (segment list) as ANSI, truncated to the width, ending with erase-to-EOL.
+function Get-AnsiLine {
+    param([object[]]$Segs, [int]$Width)
+    $e = [char]27
+    $sb = New-Object System.Text.StringBuilder
+    $len = 0; $max = [Math]::Max(1, $Width - 1)
+    foreach ($s in $Segs) {
+        if ($len -ge $max) { break }
+        $t = [string]$s.t
+        if ($t.Length -eq 0) { continue }
+        if (($len + $t.Length) -gt $max) { $t = $t.Substring(0, ($max - $len)) }
+        $len += $t.Length
+        if ($s.c -and $script:_ansi.ContainsKey($s.c)) {
+            [void]$sb.Append($e).Append('[').Append($script:_ansi[$s.c]).Append('m').Append($t).Append($e).Append('[0m')
+        } else {
+            [void]$sb.Append($t)
+        }
+    }
+    [void]$sb.Append($e).Append('[K')   # erase to end of line (clears any leftover)
+    return $sb.ToString()
+}
+
 function Invoke-SelectMenu {
     param(
         [object[]]$Header = @(),
@@ -2848,24 +2921,19 @@ function Invoke-SelectMenu {
     )
     $cursor = 0
     $needClear = $false
+    $vt = Enable-VirtualTerminal
+    $e = [char]27
     Set-MenuCursorVisible $false
     Clear-Host
     try {
         while ($true) {
-            # In-place redraw when the frame fits the window (no flicker); otherwise
-            # fall back to Clear-Host each frame (correct, some flicker on tall lists).
-            $fh = $Header.Count + 4 + $Rows.Count + 3
-            $wh = 25; try { $wh = [System.Console]::WindowHeight } catch { }
-            $inPlace = ($fh -lt $wh)
-            if ($needClear -or -not $inPlace) { Clear-Host; $needClear = $false }
-            if ($inPlace) { try { [System.Console]::SetCursorPosition(0, 0) } catch { Clear-Host } }
-
-            foreach ($h in $Header) { Write-PadLine @($h) }
-            Write-PadLine @(@{ t = '  ==============================================================='; c = 'Green' })
-            Write-PadLine @(@{ t = ("   {0}" -f $Banner); c = 'Green' })
-            Write-PadLine @(@{ t = '  ==============================================================='; c = 'Green' })
-            Write-PadLine @(@{ t = '' })
-
+            # Build the whole frame as an ordered list of segment-lines.
+            $lines = New-Object System.Collections.ArrayList
+            foreach ($h in $Header) { [void]$lines.Add(@($h)) }
+            [void]$lines.Add(@(@{ t = '  ==============================================================='; c = 'Green' }))
+            [void]$lines.Add(@(@{ t = ("   {0}" -f $Banner); c = 'Green' }))
+            [void]$lines.Add(@(@{ t = '  ==============================================================='; c = 'Green' }))
+            [void]$lines.Add(@(@{ t = '' }))
             for ($i = 0; $i -lt $Rows.Count; $i++) {
                 $r = $Rows[$i]
                 $sel = if ($r.SelectedCheck) { [bool](& $r.SelectedCheck) } else { [bool]$r.Selected }
@@ -2880,12 +2948,27 @@ function Invoke-SelectMenu {
                 $segs += @{ t = $r.Label; c = $(if ($sel) { 'Green' } else { 'White' }) }
                 if ($r.Desc)   { $segs += @{ t = (' - ' + $r.Desc); c = 'DarkGray' } }
                 if ($r.Marker) { $segs += @{ t = ('  **' + $r.Marker); c = 'Yellow' } }
-                Write-PadLine $segs
+                [void]$lines.Add($segs)
             }
+            [void]$lines.Add(@(@{ t = '  ---------------------------------------------------------------'; c = 'Yellow' }))
+            if ($Summary) { [void]$lines.Add(@(@{ t = ('  ' + (& $Summary)); c = 'Green' })) } else { [void]$lines.Add(@(@{ t = '' })) }
+            [void]$lines.Add(@(@{ t = '   UP/DN move  SPACE toggle  ENTER sub-menu  a all  n none  c confirm  q quit'; c = 'DarkGray' }))
 
-            Write-PadLine @(@{ t = '  ---------------------------------------------------------------'; c = 'Yellow' })
-            if ($Summary) { Write-PadLine @(@{ t = ('  ' + (& $Summary)); c = 'Green' }) } else { Write-PadLine @(@{ t = '' }) }
-            Write-PadLine @(@{ t = '   UP/DN move  SPACE toggle  ENTER sub-menu  a all  n none  c confirm  q quit'; c = 'DarkGray' })
+            if ($vt) {
+                # Single write: home the cursor, paint every line, erase everything below.
+                # One Console.Out.Write == no per-line flushing -> no flicker / "reload".
+                $w = 100; try { $w = [System.Console]::WindowWidth } catch { }
+                $sb = New-Object System.Text.StringBuilder
+                [void]$sb.Append($e).Append('[H')
+                foreach ($ln in $lines) { [void]$sb.Append((Get-AnsiLine $ln $w)).Append("`r`n") }
+                [void]$sb.Append($e).Append('[J')
+                [System.Console]::Out.Write($sb.ToString())
+            } else {
+                # Fallback (no VT): cursor-home + per-line write; clear on entry / after a submenu.
+                if ($needClear) { Clear-Host; $needClear = $false }
+                try { [System.Console]::SetCursorPosition(0, 0) } catch { Clear-Host }
+                foreach ($ln in $lines) { Write-PadLine $ln }
+            }
 
             $k   = [System.Console]::ReadKey($true)
             $key = $k.Key
@@ -2904,6 +2987,7 @@ function Invoke-SelectMenu {
         }
     } finally {
         Set-MenuCursorVisible $true
+        if ($vt) { try { [System.Console]::Out.Write("$e[0m") } catch { } }
     }
 }
 
@@ -2987,6 +3071,22 @@ function Show-VSCodeSubmenu {
     }
 }
 
+function Show-AliasesSubmenu {
+    $rows = New-Object System.Collections.ArrayList
+    $n = 0
+    foreach ($a in $script:CliAliases) {
+        $n++
+        $installed = Test-AliasInstalled $a.Key
+        $mk = if ($installed) { 'installed' } else { '' }
+        $sel = ($script:SelectedAliases -contains $a.Key) -or $installed
+        [void]$rows.Add(@{ Num = $n; Label = $a.Label; Desc = ''; Marker = $mk; Selected = $sel; IsGroup = $false; OnEnter = $null; Ref = $a })
+    }
+    if ((Invoke-SelectMenu -Banner 'CLI Aliases  (cckimi/ccglm auto-add their -token)' -Rows $rows) -eq 'confirm') {
+        $script:SelectedAliases = @($rows | Where-Object { $_.Selected } | ForEach-Object { $_.Ref.Key })
+        $script:AliasesTouched = $true
+    }
+}
+
 #-------------------------------------------------------------------------------
 # Main interactive menu (birebir: one flat numbered list, groups expand on ENTER)
 #-------------------------------------------------------------------------------
@@ -3004,6 +3104,7 @@ function Show-InteractiveMenu {
     $twInst = @($script:WindowsTweaks| Where-Object { Test-TweakApplied -Key $_.Key }).Count
     $dbInst = @($script:DebloatItems | Where-Object { Test-BloatRemoved -Item $_ }).Count
     $vsInst = if (Test-VSCodeInstalled) { 'installed' } else { '' }
+    $alInst = @($script:CliAliases | Where-Object { Test-AliasInstalled $_.Key }).Count
 
     # Birebir order + descriptions
     $order = @(
@@ -3018,6 +3119,7 @@ function Show-InteractiveMenu {
         @{ k='cloudflared';                   label='Cloudflared';  desc='Cloudflare Tunnel client' }
         @{ k='docker';                        label='Docker';       desc='Docker Desktop' }
         @{ k='aicli';       group='aicli';   label='AI CLI Tools'; desc='Claude, Codex, Kimi, Grok, Gemini, Qwen, GLM (Enter to expand)'; marker=(Get-GroupMarkerText $aiInst $script:AiCliTools.Count 'installed') }
+        @{ k='aliases';     group='aliases'; label='CLI Aliases';  desc='ccskip, cxskip, cckimi, ccglm (Enter to expand)'; marker=(Get-GroupMarkerText $alInst $script:CliAliases.Count 'installed') }
         @{ k='gh';                            label='GitHub CLI';   desc='GitHub CLI (gh)' }
         @{ k='postman';                       label='Postman';      desc='Postman (API testing)' }
         @{ k='filezilla';                     label='FileZilla';    desc='FileZilla (FTP/SFTP)' }
@@ -3036,6 +3138,7 @@ function Show-InteractiveMenu {
                 'tweaks'  { { Show-TweaksSubmenu } }
                 'aicli'   { { Show-AiCliSubmenu } }
                 'debloat' { { Show-DebloatSubmenu } }
+                'aliases' { { Show-AliasesSubmenu } }
             }
             $check = switch ($g) {
                 'remote'  { { @($script:RemoteTools | Where-Object { $flags[$_.Flag] }).Count -gt 0 } }
@@ -3043,6 +3146,7 @@ function Show-InteractiveMenu {
                 'tweaks'  { { $script:SelectedTweaks.Count -gt 0 } }
                 'aicli'   { { @($script:AiCliTools | Where-Object { $flags[$_.Flag] }).Count -gt 0 } }
                 'debloat' { { $script:SelectedDebloat.Count -gt 0 } }
+                'aliases' { { $script:SelectedAliases.Count -gt 0 } }
             }
             [void]$rows.Add(@{ Num=$n; Label=$o.label; Desc=$o.desc; Marker=$o.marker; IsGroup=$true; OnEnter=$onEnter; SelectedCheck=$check })
         } else {
@@ -3060,6 +3164,7 @@ function Show-InteractiveMenu {
         $ai = @($script:AiCliTools   | Where-Object { $flags[$_.Flag] } | ForEach-Object { $_.Key });   if ($ai.Count) { $parts += "AI[$($ai -join ',')]" }
         if ($script:SelectedTweaks.Count)  { $parts += "Tweaks[$($script:SelectedTweaks.Count)]" }
         if ($script:SelectedDebloat.Count) { $parts += "Debloat[$($script:SelectedDebloat.Count)]" }
+        if ($script:SelectedAliases.Count) { $parts += "Aliases[$($script:SelectedAliases.Count)]" }
         if ($flags.VSCode) { $parts += 'VSCode' }
         if ($parts.Count -gt 0) { return "Selected ($($parts.Count)): " + ($parts -join ', ') }
         return 'Selected: None'
@@ -3071,12 +3176,14 @@ function Show-InteractiveMenu {
         $script:SelectedTweaks    = @($script:WindowsTweaks | ForEach-Object { $_.Key })
         $script:SelectedDebloat   = @($script:DebloatItems  | ForEach-Object { $_.Key })
         $script:SelectedVSCodeExt = @($script:VSCodeExtensions | ForEach-Object { $_.Id })
+        $script:SelectedAliases = @($script:CliAliases | ForEach-Object { $_.Key }); $script:AliasesTouched = $true
         $flags.Tweaks = $true; $flags.Debloat = $true; $flags.VSCode = $true
     }
     $selectNone = {
         foreach ($t in $script:AiCliTools)  { $flags[$t.Flag] = $false }
         foreach ($t in $script:RemoteTools) { $flags[$t.Flag] = $false }
         $script:SelectedTweaks = @(); $script:SelectedDebloat = @(); $script:SelectedVSCodeExt = @()
+        $script:SelectedAliases = @(); $script:AliasesTouched = $true
         $flags.Tweaks = $false; $flags.Debloat = $false; $flags.VSCode = $false
     }
 
@@ -3186,6 +3293,11 @@ function Invoke-Installations {
     if ($flags.Debloat) {
         if (-not $script:SelectedDebloat -or $script:SelectedDebloat.Count -eq 0) { Show-DebloatSubmenu }
         Invoke-Debloat
+    }
+
+    # CLI aliases (own menu group) - install selected + auto-bundled tokens, remove deselected
+    if ($script:AliasesTouched -or ($script:SelectedAliases -and $script:SelectedAliases.Count -gt 0)) {
+        Set-CliAliases | Out-Null
     }
 
     Show-Summary

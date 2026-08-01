@@ -99,7 +99,6 @@ Everything below is reachable through the interactive menu (`--menu`) or directl
 | Script Launcher | Right-click context menu (Claude, Codex, VS Code) |
 | OpenSSH Server | Install + auto-start SSH server (port 22) |
 | Change Hostname | Set the computer's hostname |
-| CLI Aliases | Global `.cmd` commands in `%USERPROFILE%\apps\aliases\` (added to PATH, so they work from any shell): `ccskip`/`cxskip` (skip-permission Claude/Codex), `cckimi`/`ccglm` (Claude Code on the Kimi / Z.AI-GLM backends) + `cckimi-token`/`ccglm-token` (save the API key) |
 | Screen Off: Never | Disable display timeout + sleep |
 | Show Hidden Files | Show hidden files + file extensions |
 | Keyboard: Turkish Q | Add Turkish-Q keyboard layout |
@@ -142,7 +141,14 @@ Run without flags (or with `--menu`) for a keyboard-driven menu:
 irm https://bit.ly/windows-ey | iex
 ```
 
-Navigate with **↑↓**, toggle with **SPACE**, `a` = all, `n` = none, `c`/`ESC` = save & continue, `q` = discard. Grouped items (AI CLI Tools, Remote Support Tools, Windows Tweaks, Debloat, VS Code) open their own submenus.
+Navigate with **↑↓**, toggle with **SPACE**, `a` = all, `n` = none, `c`/`ESC` = save & continue, `q` = discard. Grouped items (AI CLI Tools, Remote Support Tools, Windows Tweaks, Debloat, VS Code, CLI Aliases) open their own submenus.
+
+### 🔑 CLI Aliases (submenu)
+
+Global `.cmd` commands installed into `%USERPROFILE%\apps\aliases\` (added to PATH, so they work from any shell). Pick them individually in the **CLI Aliases** submenu:
+
+- `ccskip` / `cxskip` — Claude / Codex with skip-permission flags
+- `cckimi` / `ccglm` — Claude Code on the Kimi / Z.AI-GLM backends (selecting one **auto-installs** its `cckimi-token` / `ccglm-token` key setter)
 
 ## 💾 Backup & Restore
 
