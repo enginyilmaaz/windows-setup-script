@@ -147,7 +147,7 @@ Navigate with **↑↓**, toggle with **SPACE**, `a` = all, `n` = none, `c`/`ESC
 
 Global `.cmd` commands installed into `%USERPROFILE%\apps\aliases\` (added to PATH, so they work from any shell). Pick them individually inside the **Windows Tweaks** submenu:
 
-- `ccskip` / `cxskip` — Claude / Codex with skip-permission flags
+- `ccskip` / `cxskip` — Claude Code on your normal Anthropic login, skip-permissions (pinned to Opus 4.8 / Opus 5)
 - `cckimi` / `ccglm` — Claude Code on the Kimi / Z.AI-GLM backends (selecting one **auto-installs** its `cckimi-token` / `ccglm-token` key setter)
 
 ## 💾 Backup & Restore

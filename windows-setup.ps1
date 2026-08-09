@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.5.2'
-$script:SCRIPT_REVISION = '20'
+$script:SCRIPT_VERSION  = '1.6.0'
+$script:SCRIPT_REVISION = '21'
 $script:SCRIPT_DATE     = '2026-07-27'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -539,8 +539,8 @@ $script:WindowsTweaks = @(
 
 # CLI aliases (own submenu group). cckimi/ccglm auto-bundle their *-token setter.
 $script:CliAliases = @(
-    @{ Key='ccskip'; Label='ccskip  (claude --dangerously-skip-permissions --effort max)' }
-    @{ Key='cxskip'; Label='cxskip  (codex --sandbox danger-full-access ...)' }
+    @{ Key='ccskip'; Label='ccskip  (Claude skip-permissions, Opus 4.8)' }
+    @{ Key='cxskip'; Label='cxskip  (Claude skip-permissions, Opus 5)' }
     @{ Key='cckimi'; Label='cckimi  (Claude Code on the Kimi backend)  [+ cckimi-token]' }
     @{ Key='ccglm';  Label='ccglm   (Claude Code on the Z.AI GLM backend)  [+ ccglm-token]' }
 )
@@ -2073,11 +2073,11 @@ function Set-CliAliases {
         $cmds = [ordered]@{}
         $cmds['ccskip'] = @'
 @echo off
-claude --dangerously-skip-permissions --effort max %*
+call claude --dangerously-skip-permissions --effort max --model claude-opus-4-8 %*
 '@
         $cmds['cxskip'] = @'
 @echo off
-codex --sandbox danger-full-access -c model_reasoning_effort=xhigh %*
+call claude --dangerously-skip-permissions --effort max --model claude-opus-5 %*
 '@
         $cmds['cckimi'] = @'
 @echo off
@@ -2099,9 +2099,9 @@ set "ANTHROPIC_BASE_URL=https://api.kimi.com/coding/"
 set "ANTHROPIC_AUTH_TOKEN=%token%"
 set "ANTHROPIC_MODEL=kimi-k3[1m]"
 set "ANTHROPIC_DEFAULT_OPUS_MODEL=kimi-k3[1m]"
-set "ANTHROPIC_DEFAULT_SONNET_MODEL=kimi-k3[1m]"
-set "ANTHROPIC_DEFAULT_HAIKU_MODEL=kimi-k3[1m]"
-set "ANTHROPIC_DEFAULT_FABLE_MODEL=kimi-k3[1m]"
+set "ANTHROPIC_DEFAULT_SONNET_MODEL=kimi-k2.7-code"
+set "ANTHROPIC_DEFAULT_HAIKU_MODEL=kimi-k2.7-code"
+set "ANTHROPIC_DEFAULT_FABLE_MODEL=kimi-k2.7-code-highspeed"
 set "CLAUDE_CODE_SUBAGENT_MODEL=kimi-k3[1m]"
 set "ENABLE_TOOL_SEARCH=false"
 set "CLAUDE_CODE_AUTO_COMPACT_WINDOW=1048576"
@@ -2128,9 +2128,9 @@ set "ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic"
 set "ANTHROPIC_AUTH_TOKEN=%token%"
 set "ANTHROPIC_MODEL=glm-5.2[1m]"
 set "ANTHROPIC_DEFAULT_OPUS_MODEL=glm-5.2[1m]"
-set "ANTHROPIC_DEFAULT_SONNET_MODEL=glm-5.2[1m]"
-set "ANTHROPIC_DEFAULT_HAIKU_MODEL=glm-5.2[1m]"
-set "ANTHROPIC_DEFAULT_FABLE_MODEL=glm-5.2[1m]"
+set "ANTHROPIC_DEFAULT_SONNET_MODEL=glm-4.6"
+set "ANTHROPIC_DEFAULT_HAIKU_MODEL=glm-4.5-air"
+set "ANTHROPIC_DEFAULT_FABLE_MODEL=glm-4.7-flashx"
 set "CLAUDE_CODE_SUBAGENT_MODEL=glm-5.2[1m]"
 set "CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000"
 set "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
