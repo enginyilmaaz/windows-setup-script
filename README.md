@@ -109,7 +109,6 @@ Everything below is reachable through the interactive menu (`--menu`) or directl
 | Taskbar Tweaks | Taskbar alignment/size adjustments |
 | Activate Error Reporting | Enable Windows Error Reporting |
 | Install Camera App | Install the Windows Camera app |
-| Mouse Jiggler | Install a software mouse-jiggler (`ArkaneSystems.MouseJiggler`) that fakes pointer activity to keep the session awake — no hardware/USB device needed |
 | Cleanup: Storage Sense | Auto-clean temp files & recycle bin |
 | RealVNC: normal cursor | Fix the RealVNC "dot" cursor on a headless / mouse-less host by enabling RealVNC Server's `AlwaysShowCursor` (shown only when RealVNC is installed) |
 | Node.js: switch to NVM | Replace a native Node.js with nvm-windows (shown only when Node is non-NVM) |
@@ -169,7 +168,6 @@ Remove pre-installed Windows apps and (optionally) the dev tools/browsers this s
 - **More modern apps:** Dev Home, Microsoft 365 / Office, Bing Search, Sticky Notes, Teams (new), To Do, Outlook for Windows, Paint, Power Automate, LinkedIn, Photos, Clock, Calculator, Sound Recorder, Camera, Mobile devices (Cross Device), Widgets Platform Runtime, Web Experience Pack
 - **Media/image codec extensions:** VP9 / HEVC / HEIF / WebP / AV1 / … (⚠️ removing these can break video/image playback)
 - **Dev tools / browsers:** Chrome, Node.js, Docker, VS Code, DBeaver, Postman, FileZilla, GitHub CLI, cloudflared
-- **Utilities:** Mouse Jiggler
 - **Remote tools:** AnyDesk, RustDesk, TeamViewer, RealVNC
 
 </details>
