@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.6.6'
-$script:SCRIPT_REVISION = '27'
+$script:SCRIPT_VERSION  = '1.7.0'
+$script:SCRIPT_REVISION = '28'
 $script:SCRIPT_DATE     = '2026-08-10'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -537,6 +537,10 @@ $script:WindowsTweaks = @(
     @{ Key='auto-login';       Label='Auto-Login on boot';                   Apply='Enable-AutoLogin' }
     @{ Key='tray-icons';       Label='Always Show All Tray Icons';           Apply='Set-AlwaysShowTrayIcons' }
     @{ Key='taskbar';          Label='Taskbar Tweaks';                       Apply='Set-TaskbarTweaks' }
+    @{ Key='taskbar-left';     Label='Taskbar/Start: align left';            Apply='Set-TaskbarAlignLeft' }
+    @{ Key='search-icon';      Label='Taskbar Search: icon only';            Apply='Set-SearchBoxIcon' }
+    @{ Key='disable-search';   Label='Disable Windows Search (WSearch service)'; Apply='Disable-WindowsSearchService' }
+    @{ Key='disable-updates';  Label='Disable Windows Updates';              Apply='Disable-WindowsUpdates' }
     @{ Key='error-reporting';  Label='Activate Error Reporting';             Apply='Enable-WindowsErrorReporting' }
     @{ Key='camera';           Label='Install Camera App';                   Apply='Install-CameraApp' }
     @{ Key='storage-sense';    Label='Cleanup: Storage Sense';               Apply='Enable-StorageSense' }
@@ -1736,6 +1740,8 @@ $script:TWEAK_REG_KEYS = @(
     'HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting',          # error reporting
     'HKLM\SOFTWARE\Policies\Microsoft\Windows\StorageSense',            # storage sense policy
     'HKLM\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName',  # hostname
+    'HKCU\Software\Microsoft\Windows\CurrentVersion\Search',            # taskbar search box mode
+    'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate',           # disable updates policy
     # --- Explorer / UI tweaks (the ported .reg pack) --------------------------
     # Only the exact keys these tweaks touch: HKCU\Software\Classes\CLSID as a
     # whole is far too large to export on every run.
@@ -2512,6 +2518,84 @@ function Set-TaskbarTweaks {
     }
 }
 
+# Taskbar/Start: align left only (TaskbarAl=0). Focused single-purpose tweak
+# (the combined Set-TaskbarTweaks also changes grouping/size).
+function Set-TaskbarAlignLeft {
+    Write-LogInfo "Aligning the taskbar and Start button to the left..."
+    $adv = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
+    try {
+        if (-not (Test-Path -LiteralPath $adv)) { New-Item -Path $adv -Force | Out-Null }
+        New-ItemProperty -LiteralPath $adv -Name 'TaskbarAl' -Value 0 -PropertyType DWord -Force | Out-Null  # 0=left, 1=centre
+        $p = Get-Process -Name explorer -ErrorAction SilentlyContinue
+        if ($p) { Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue }
+        Write-LogSuccess "Taskbar/Start aligned left (Explorer restarted)."
+        return $true
+    } catch {
+        Write-LogWarning "Could not align the taskbar left: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+# Taskbar Search: show as a small icon only (SearchboxTaskbarMode: 0=hidden,
+# 1=icon, 2=box, 3=box+label).
+function Set-SearchBoxIcon {
+    Write-LogInfo "Setting the taskbar search to icon-only..."
+    $sk = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Search'
+    try {
+        if (-not (Test-Path -LiteralPath $sk)) { New-Item -Path $sk -Force | Out-Null }
+        New-ItemProperty -LiteralPath $sk -Name 'SearchboxTaskbarMode' -Value 1 -PropertyType DWord -Force | Out-Null
+        $p = Get-Process -Name explorer -ErrorAction SilentlyContinue
+        if ($p) { Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue }
+        Write-LogSuccess "Taskbar search set to icon-only (Explorer restarted)."
+        return $true
+    } catch {
+        Write-LogWarning "Could not change the search box mode: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+# Disable Windows Search: stop + disable the WSearch indexer service. Start-menu
+# search still works, but content indexing (and its disk/CPU use) stops.
+function Disable-WindowsSearchService {
+    Write-LogInfo "Disabling the Windows Search (WSearch) indexer service..."
+    try {
+        $s = Get-Service -Name 'WSearch' -ErrorAction SilentlyContinue
+        if (-not $s) { Write-LogInfo "The WSearch service is not present on this system."; return $true }
+        if ($s.Status -eq 'Running') { Stop-Service -Name 'WSearch' -Force -ErrorAction SilentlyContinue }
+        Set-Service -Name 'WSearch' -StartupType Disabled -ErrorAction SilentlyContinue
+        Write-LogSuccess "Windows Search indexing disabled. Re-enable later with: sc config WSearch start=delayed-auto"
+        return $true
+    } catch {
+        Write-LogWarning "Could not disable Windows Search: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+# Disable Windows Updates: set the NoAutoUpdate policy and stop+disable the
+# update services. SECURITY: this halts security patches - re-enable periodically.
+function Disable-WindowsUpdates {
+    Write-LogWarning "Disabling Windows Update stops SECURITY patches - re-enable it periodically to stay protected."
+    Write-LogInfo "Disabling Windows automatic updates (policy + services)..."
+    try {
+        $au = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU'
+        if (-not (Test-Path -LiteralPath $au)) { New-Item -Path $au -Force | Out-Null }
+        New-ItemProperty -LiteralPath $au -Name 'NoAutoUpdate' -Value 1 -PropertyType DWord -Force | Out-Null
+        New-ItemProperty -LiteralPath $au -Name 'AUOptions'    -Value 1 -PropertyType DWord -Force | Out-Null  # 1 = never check
+        foreach ($svc in @('wuauserv', 'UsoSvc')) {
+            $s = Get-Service -Name $svc -ErrorAction SilentlyContinue
+            if ($s) {
+                if ($s.Status -eq 'Running') { Stop-Service -Name $svc -Force -ErrorAction SilentlyContinue }
+                Set-Service -Name $svc -StartupType Disabled -ErrorAction SilentlyContinue
+            }
+        }
+        Write-LogSuccess "Windows automatic updates disabled. Re-enable with: sc config wuauserv start=demand (+ remove the NoAutoUpdate policy)."
+        return $true
+    } catch {
+        Write-LogWarning "Could not fully disable Windows Update: $($_.Exception.Message)"
+        return $false
+    }
+}
+
 # Enable Windows Error Reporting (WER). Mirrors "Activate Apport".
 function Enable-WindowsErrorReporting {
     Write-LogInfo "Enabling Windows Error Reporting..."
@@ -2657,6 +2741,22 @@ function Test-TweakApplied {
             'taskbar' {
                 $v = (Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'TaskbarAl' -ErrorAction SilentlyContinue).TaskbarAl
                 return ($v -eq 0)
+            }
+            'taskbar-left' {
+                $v = (Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'TaskbarAl' -ErrorAction SilentlyContinue).TaskbarAl
+                return ($v -eq 0)
+            }
+            'search-icon' {
+                $v = (Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Search' -Name 'SearchboxTaskbarMode' -ErrorAction SilentlyContinue).SearchboxTaskbarMode
+                return ($v -eq 1)
+            }
+            'disable-search' {
+                $s = Get-Service -Name 'WSearch' -ErrorAction SilentlyContinue
+                return ($null -ne $s -and $s.StartType -eq 'Disabled')
+            }
+            'disable-updates' {
+                $v = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -Name 'NoAutoUpdate' -ErrorAction SilentlyContinue).NoAutoUpdate
+                return ($v -eq 1)
             }
             'error-reporting' {
                 $v = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting' -Name 'Disabled' -ErrorAction SilentlyContinue).Disabled
@@ -3858,6 +3958,7 @@ function Invoke-SelectMenu {
         [switch]$SubMenu
     )
     $cursor = 0
+    $scrollTop = 0
     $numBuf = ''
     $needClear = $false
     $vt = Enable-VirtualTerminal
@@ -3866,6 +3967,23 @@ function Invoke-SelectMenu {
     Clear-Host
     try {
         while ($true) {
+            # --- Scrolling viewport: render only the rows that fit on screen, and
+            #     scroll the window to keep the cursor visible. Prevents a long list
+            #     (e.g. 50+ debloat items) from overflowing and scrolling the header
+            #     off the top of the terminal. Row-window height is kept constant so
+            #     the frame never grows past the window (no terminal scroll).
+            $winH = 30; try { $winH = [System.Console]::WindowHeight } catch { }
+            $topChrome = $Header.Count + 5   # header + ===/banner/=== + blank + scroll-up marker
+            $botChrome = 4                    # scroll-down marker + --- + summary + hint
+            $viewport = $winH - $topChrome - $botChrome - 1
+            if ($viewport -lt 3) { $viewport = 3 }
+            if ($viewport -gt $Rows.Count) { $viewport = $Rows.Count }
+            if ($cursor -lt $scrollTop) { $scrollTop = $cursor }
+            elseif ($cursor -ge ($scrollTop + $viewport)) { $scrollTop = $cursor - $viewport + 1 }
+            $maxTop = [Math]::Max(0, $Rows.Count - $viewport)
+            if ($scrollTop -gt $maxTop) { $scrollTop = $maxTop }
+            if ($scrollTop -lt 0) { $scrollTop = 0 }
+
             # Build the whole frame as an ordered list of segment-lines.
             $lines = New-Object System.Collections.ArrayList
             foreach ($h in $Header) { [void]$lines.Add(@($h)) }
@@ -3873,7 +3991,11 @@ function Invoke-SelectMenu {
             [void]$lines.Add(@(@{ t = ("   {0}" -f $Banner); c = 'Green' }))
             [void]$lines.Add(@(@{ t = '  ==============================================================='; c = 'Green' }))
             [void]$lines.Add(@(@{ t = '' }))
-            for ($i = 0; $i -lt $Rows.Count; $i++) {
+            # scroll-up marker (always present so the row window keeps a constant height)
+            if ($scrollTop -gt 0) { [void]$lines.Add(@(@{ t = ("      ^^^  {0} more above" -f $scrollTop); c = 'DarkGray' })) }
+            else                  { [void]$lines.Add(@(@{ t = '' })) }
+            $viewEnd = [Math]::Min($Rows.Count, $scrollTop + $viewport)
+            for ($i = $scrollTop; $i -lt $viewEnd; $i++) {
                 $r = $Rows[$i]
                 $sel = if ($r.SelectedCheck) { [bool](& $r.SelectedCheck) } else { [bool]$r.Selected }
                 $segs = @()
@@ -3896,15 +4018,20 @@ function Invoke-SelectMenu {
                 if ($r.Marker) { $segs += @{ t = ('  **' + $r.Marker); c = 'Yellow' } }
                 [void]$lines.Add($segs)
             }
+            # scroll-down marker + position, always present to keep the height constant
+            $below = $Rows.Count - $viewEnd
+            $pos = ("[item {0}/{1}]" -f ($cursor + 1), $Rows.Count)
+            if ($below -gt 0) { [void]$lines.Add(@(@{ t = ("      vvv  {0} more below     {1}" -f $below, $pos); c = 'DarkGray' })) }
+            else              { [void]$lines.Add(@(@{ t = ("      {0}" -f $pos); c = 'DarkGray' })) }
             [void]$lines.Add(@(@{ t = '  ---------------------------------------------------------------'; c = 'Yellow' }))
             if ($Summary) { [void]$lines.Add(@(@{ t = ('  ' + (& $Summary)); c = 'Green' })) } else { [void]$lines.Add(@(@{ t = '' })) }
             # In a sub-menu, both c and q/ESC return to the parent AND keep the current
             # selection (there is no "cancel" - you are building up a larger selection).
             if ($SubMenu) {
-                if ($TriMode) { $hint = '   UP/DN move  0-9 jump  SPACE [ ]->[x] apply->[r] revert  a all  n none  c/ESC/q back & keep' }
-                else          { $hint = '   UP/DN move  0-9 jump  SPACE toggle  a all  n none  c/ESC/q back & keep' }
+                if ($TriMode) { $hint = '   UP/DN/PgUp/PgDn move  0-9 jump  SPACE [ ]->[x] apply->[r] revert  a all  n none  c/ESC/q back & keep' }
+                else          { $hint = '   UP/DN/PgUp/PgDn move  0-9 jump  SPACE toggle  a all  n none  c/ESC/q back & keep' }
             } else {
-                $hint = '   UP/DN move  0-9 jump  SPACE toggle  ENTER sub-menu  a all  n none  c confirm  q quit'
+                $hint = '   UP/DN/PgUp/PgDn move  0-9 jump  SPACE toggle  ENTER sub-menu  a all  n none  c confirm  q quit'
             }
             if ($numBuf) { $hint += "    #$numBuf" }
             [void]$lines.Add(@(@{ t = $hint; c = 'DarkGray' }))
@@ -3942,6 +4069,10 @@ function Invoke-SelectMenu {
 
             if ($key -eq 'UpArrow'   -or $ch -eq 'k') { if ($cursor -gt 0) { $cursor-- } }
             elseif ($key -eq 'DownArrow' -or $ch -eq 'j') { if ($cursor -lt $Rows.Count - 1) { $cursor++ } }
+            elseif ($key -eq 'PageUp')   { $cursor = [Math]::Max(0, $cursor - $viewport) }
+            elseif ($key -eq 'PageDown') { $cursor = [Math]::Min($Rows.Count - 1, $cursor + $viewport) }
+            elseif ($key -eq 'Home')     { $cursor = 0 }
+            elseif ($key -eq 'End')      { $cursor = $Rows.Count - 1 }
             elseif ($key -eq 'Spacebar' -or $key -eq 'Enter') {
                 $r = $Rows[$cursor]
                 if ($r.OnEnter) {

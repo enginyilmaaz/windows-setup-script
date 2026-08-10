@@ -107,6 +107,10 @@ Everything below is reachable through the interactive menu (`--menu`) or directl
 | Auto-Login | Auto-login to Windows on boot |
 | Always Show Tray Icons | Show all notification-area icons |
 | Taskbar Tweaks | Taskbar alignment/size adjustments |
+| Taskbar/Start: align left | Move the Start button + taskbar icons to the left (`TaskbarAl=0`) |
+| Taskbar Search: icon only | Show the taskbar search as a compact icon (`SearchboxTaskbarMode=1`) |
+| Disable Windows Search | Stop + disable the `WSearch` indexer service |
+| Disable Windows Updates | Set the `NoAutoUpdate` policy and disable the update services (⚠️ stops security patches) |
 | Activate Error Reporting | Enable Windows Error Reporting |
 | Install Camera App | Install the Windows Camera app |
 | Cleanup: Storage Sense | Auto-clean temp files & recycle bin |
@@ -182,7 +186,7 @@ Run without flags (or with `--menu`) for a keyboard-driven menu:
 irm https://bit.ly/windows-ey | iex
 ```
 
-Navigate with **↑↓**, toggle with **SPACE**, `a` = all, `n` = none, `c`/`ESC` = save & continue, `q` = discard. Grouped items (AI CLI Tools, Remote Support Tools, Windows Tweaks, Explorer & UI, Debloat, VS Code) open their own submenus. In the **Explorer & UI** submenu, SPACE cycles three states instead of two: `[ ]` → `[x]` apply → `[r]` revert.
+Navigate with **↑↓** (or **PgUp/PgDn/Home/End** for long lists — the list scrolls in a fixed viewport so the header stays put), toggle with **SPACE**, `a` = all, `n` = none, `c`/`ESC` = save & continue, `q` = discard. Grouped items (AI CLI Tools, Remote Support Tools, Windows Tweaks, Explorer & UI, Debloat, VS Code) open their own submenus. In the **Explorer & UI** submenu, SPACE cycles three states instead of two: `[ ]` → `[x]` apply → `[r]` revert.
 
 ### 🔑 CLI Aliases
 
