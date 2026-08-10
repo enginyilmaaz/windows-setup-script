@@ -117,6 +117,44 @@ Everything below is reachable through the interactive menu (`--menu`) or directl
 
 > Before applying tweaks, the script creates a **System Restore point** and exports the touched registry keys to `%USERPROFILE%\.windows_setup_conf_backup`.
 
+### 🗂️ Explorer &amp; UI Tweaks (`--uitweaks`)
+
+Registry/shell tweaks for File Explorer, the navigation pane and the context menu — ported from the classic `.reg` / `.cmd` tweak packs to native PowerShell. Aliases: `--ui`, `--explorer`, `--reg-tweaks`.
+
+Every entry is a **two-way toggle**. In the submenu, **SPACE** cycles each row `[ ]` leave alone → `[x]` apply → `[r]` revert.
+
+<details>
+<summary>Explorer, context-menu &amp; system tweaks — click to expand</summary>
+
+| Tweak | Apply | Revert |
+|-------|-------|--------|
+| This PC: user folders | Remove Desktop/Documents/Downloads/Music/Pictures/Videos | Put them back |
+| This PC: 3D Objects | Remove the 3D Objects folder | Put it back |
+| Nav pane: Network | Hide Network | Show Network |
+| Nav pane: HomeGroup | Hide HomeGroup (Windows 10) | Show HomeGroup |
+| Nav pane: removable drives | Remove the duplicate drive entries | Restore them |
+| Nav pane: Gallery | Hide Gallery (Windows 11) | Show Gallery |
+| Nav pane: Home | Hide Home (Windows 11) | Show Home |
+| Quick Access | Hide frequently-used folders | Show them |
+| Win11 context menu | Restore the classic (full) right-click menu | Back to the compact Win11 menu |
+| Context menu: Share with | Remove the `Sharing` shell handlers | Re-import from backup |
+| Properties: Sharing tab | Remove the Sharing property sheet | Re-import from backup |
+| Previous Versions | Remove the context-menu entry **and** the Properties tab | Re-import from backup |
+| Action Center | Disable the notification centre (policy) | Re-enable |
+| Lock screen | Disable for all users (policy) | Re-enable |
+| Search box | Disable web suggestions | Re-enable |
+| NumLock | On at the logon screen **and** after sign-in | Off |
+| Superfetch / Prefetch | Stop + disable `SysMain`, `EnablePrefetcher=0`, clear the Prefetch cache | Re-enable (`start=auto`, `EnablePrefetcher=3`) |
+| Windows Photo Viewer | Re-register it for `.tif .tiff .png .bmp .jpeg .jpg .ico` | Unregister |
+| Rebuild icon cache | One-shot: `ie4uinit -show`, drop `IconCache.db`, restart Explorer | — |
+| Flush DNS | One-shot: `ipconfig /flushdns` + `/release` + `/renew` | — |
+
+</details>
+
+> Tweaks that **delete** registry keys export them to `%USERPROFILE%\.windows_setup_conf_backup\ui-tweaks\<tweak>\` first, so *revert* re-imports the exact original instead of guessing at Windows' defaults. A key deleted outside this script has no export to restore from, and the revert says so rather than inventing values.
+
+> ⚠️ **Flush DNS** releases and renews the DHCP lease — a remote session (RDP/VNC/AnyDesk/RustDesk) may drop for a few seconds. **Rebuild icon cache** restarts Explorer. Neither is included when you press `a` (select all).
+
 ### 🧹 Debloat (`--debloat`)
 
 Remove pre-installed Windows apps and (optionally) the dev tools/browsers this script installs. The removable list is fully customizable — edit `$script:DebloatItems` at the top of the debloat section.
@@ -141,7 +179,7 @@ Run without flags (or with `--menu`) for a keyboard-driven menu:
 irm https://bit.ly/windows-ey | iex
 ```
 
-Navigate with **↑↓**, toggle with **SPACE**, `a` = all, `n` = none, `c`/`ESC` = save & continue, `q` = discard. Grouped items (AI CLI Tools, Remote Support Tools, Windows Tweaks, Debloat, VS Code) open their own submenus.
+Navigate with **↑↓**, toggle with **SPACE**, `a` = all, `n` = none, `c`/`ESC` = save & continue, `q` = discard. Grouped items (AI CLI Tools, Remote Support Tools, Windows Tweaks, Explorer & UI, Debloat, VS Code) open their own submenus. In the **Explorer & UI** submenu, SPACE cycles three states instead of two: `[ ]` → `[x]` apply → `[r]` revert.
 
 ### 🔑 CLI Aliases
 

@@ -24,9 +24,9 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.6.0'
-$script:SCRIPT_REVISION = '21'
-$script:SCRIPT_DATE     = '2026-07-27'
+$script:SCRIPT_VERSION  = '1.6.1'
+$script:SCRIPT_REVISION = '22'
+$script:SCRIPT_DATE     = '2026-08-10'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
 $script:SELF_URL = 'https://bit.ly/windows-ey'
@@ -65,7 +65,7 @@ $flags = @{
     Vnc        = $false; AnyDesk = $false; RustDesk = $false; TeamViewer = $false
     Remote     = $false
     # windows-native groups (were GNOME tweaks / debloat)
-    Tweaks     = $false; Debloat = $false
+    Tweaks     = $false; Debloat = $false; UiTweaks = $false
     # helpers / special commands
     Login      = $false; SkipUpdate = $false
     ShowBackup = $false; Restore = $false
@@ -119,6 +119,11 @@ foreach ($arg in $script:RAW_ARGS) {
         'tweaks'      { $flags.Tweaks = $true }
         'gnome'       { $flags.Tweaks = $true }   # source alias, kept for muscle memory
         'debloat'     { $flags.Debloat = $true }
+        'uitweaks'    { $flags.UiTweaks = $true }
+        'ui'          { $flags.UiTweaks = $true }
+        'explorer'    { $flags.UiTweaks = $true }
+        'regtweaks'   { $flags.UiTweaks = $true }
+        'reg-tweaks'  { $flags.UiTweaks = $true }
         # helpers / special
         'login'       { $flags.Login = $true }
         'skip-update' { $flags.SkipUpdate = $true }
@@ -459,6 +464,9 @@ REMOTE SUPPORT:
 
 WINDOWS TWEAKS / DEBLOAT:
   --tweaks          Windows desktop tweaks + settings (submenu)
+  --uitweaks        Explorer / nav pane / context-menu / registry tweaks (submenu)
+                    (aliases: --ui, --explorer, --reg-tweaks; each entry can be
+                     applied [x] or reverted [r] from the submenu)
   --debloat         Remove pre-installed Windows bloat (submenu)
 
 HELPERS:
@@ -476,7 +484,7 @@ function Show-Version {
 }
 
 #===============================================================================
-# Catalog — the single data model the menu AND the flag dispatcher both read.
+# Catalog - the single data model the menu AND the flag dispatcher both read.
 # Each record names an Install/Apply function and a Detect function that live in
 # the other fragments. Keep the function names here in sync with those fragments.
 #===============================================================================
@@ -515,7 +523,7 @@ $script:RemoteTools = @(
     @{ Key='teamviewer'; Flag='TeamViewer'; Label='TeamViewer';      Install='Install-TeamViewer'; Detect='Test-TeamViewerInstalled' }
 )
 
-# Windows tweaks (submenu group) — Windows-native equivalents of the GNOME tweaks
+# Windows tweaks (submenu group) - Windows-native equivalents of the GNOME tweaks
 $script:WindowsTweaks = @(
     @{ Key='update-system';    Label='Update System (winget upgrade --all)'; Apply='Update-WindowsSystem' }
     @{ Key='script-launcher';  Label='Script Launcher (right-click menu)';   Apply='Set-ScriptLauncherContextMenu' }
@@ -537,6 +545,32 @@ $script:WindowsTweaks = @(
     @{ Key='switch-node-native'; Label='Node.js: switch to native (non-NVM)'; Apply='Switch-NodeToNative'; ShowIf='Test-NvmInstalled' }
 )
 
+# Explorer / UI tweaks (own submenu group) - the .reg + .cmd collection, ported to
+# native registry/service calls. Every entry is a TWO-WAY toggle: Apply does the
+# thing, Revert undoes it. Revert=$null marks a one-shot action (nothing to undo).
+$script:UiTweaks = @(
+    @{ Key='thispc-folders';     Label='This PC: remove the 6 user folders';           Apply='Remove-ThisPcUserFolders';     Revert='Restore-ThisPcUserFolders' }
+    @{ Key='thispc-3d';          Label='This PC: remove 3D Objects';                   Apply='Remove-3DObjectsFolder';       Revert='Restore-3DObjectsFolder' }
+    @{ Key='nav-network';        Label='Nav pane: remove Network';                     Apply='Remove-NavPaneNetwork';        Revert='Restore-NavPaneNetwork' }
+    @{ Key='nav-homegroup';      Label='Nav pane: remove HomeGroup';                   Apply='Remove-NavPaneHomeGroup';      Revert='Restore-NavPaneHomeGroup' }
+    @{ Key='nav-drives';         Label='Nav pane: remove duplicate removable drives';  Apply='Remove-NavPaneDrives';         Revert='Restore-NavPaneDrives' }
+    @{ Key='nav-gallery';        Label='Nav pane: remove Gallery (Win11)';             Apply='Remove-NavPaneGallery';        Revert='Restore-NavPaneGallery' }
+    @{ Key='nav-home';           Label='Nav pane: remove Home (Win11)';                Apply='Remove-NavPaneHome';           Revert='Restore-NavPaneHome' }
+    @{ Key='quick-access';       Label='Quick Access: hide frequent folders';          Apply='Hide-QuickAccessFrequent';     Revert='Show-QuickAccessFrequent' }
+    @{ Key='classic-context';    Label='Win11: classic (full) right-click menu';       Apply='Enable-ClassicContextMenu';    Revert='Disable-ClassicContextMenu' }
+    @{ Key='ctx-share';          Label="Context menu: remove 'Share with'";            Apply='Remove-ShareContextMenu';      Revert='Restore-ShareContextMenu' }
+    @{ Key='ctx-sharing-tab';    Label='Properties: remove the Sharing tab';           Apply='Remove-SharingPropertyTab';    Revert='Restore-SharingPropertyTab' }
+    @{ Key='ctx-prev-versions';  Label="Remove 'Previous Versions' (menu + tab)";      Apply='Remove-PreviousVersions';      Revert='Restore-PreviousVersions' }
+    @{ Key='action-center';      Label='Disable Action Center / notifications';        Apply='Disable-ActionCenter';         Revert='Enable-ActionCenter' }
+    @{ Key='lock-screen';        Label='Disable the lock screen';                      Apply='Disable-LockScreen';           Revert='Enable-LockScreen' }
+    @{ Key='search-suggestions'; Label='Disable search box web suggestions';           Apply='Disable-SearchBoxSuggestions'; Revert='Enable-SearchBoxSuggestions' }
+    @{ Key='numlock';            Label='NumLock on at boot';                           Apply='Enable-NumLockAtBoot';         Revert='Disable-NumLockAtBoot' }
+    @{ Key='superfetch';         Label='Disable Superfetch (SysMain) + Prefetch';      Apply='Disable-SuperfetchPrefetch';   Revert='Enable-SuperfetchPrefetch' }
+    @{ Key='photo-viewer';       Label='Restore the classic Windows Photo Viewer';     Apply='Restore-WindowsPhotoViewer';   Revert='Remove-WindowsPhotoViewer' }
+    @{ Key='icon-cache';         Label='Rebuild the icon cache (one-shot)';            Apply='Reset-IconCache';              Revert=$null }
+    @{ Key='dns-flush';          Label='Flush DNS + renew the IP lease (one-shot)';    Apply='Clear-DnsCache';               Revert=$null }
+)
+
 # CLI aliases (own submenu group). cckimi/ccglm auto-bundle their *-token setter.
 $script:CliAliases = @(
     @{ Key='ccskip'; Label='ccskip  (Claude skip-permissions, Opus 4.8)' }
@@ -545,7 +579,7 @@ $script:CliAliases = @(
     @{ Key='ccglm';  Label='ccglm   (Claude Code on the Z.AI GLM backend)  [+ ccglm-token]' }
 )
 
-# VS Code extensions (VS Code submenu) — IDs mirror the source install_vscode_extensions
+# VS Code extensions (VS Code submenu) - IDs mirror the source install_vscode_extensions
 $script:VSCodeExtensions = @(
     @{ Key='claude';    Id='anthropic.claude-code';                   Label='Claude Code' }
     @{ Key='codex';     Id='openai.chatgpt';                          Label='Codex / ChatGPT' }
@@ -1665,8 +1699,8 @@ function Test-RemoteUpdateAvailable {
 #===============================================================================
 # Windows Tweaks + Backup/Restore fragment
 #
-# Windows-native counterpart of the Ubuntu script's 20 GNOME tweaks (§4.4) plus
-# the backup/restore flow (§4.6). Only function definitions live here; the shared
+# Windows-native counterpart of the Ubuntu script's 20 GNOME tweaks (sec. 4.4) plus
+# the backup/restore flow (sec. 4.6). Only function definitions live here; the shared
 # helpers (Write-Log*, Invoke-WithRetry, Test-Command, Install-App, $script:USER_HOME,
 # $script:BACKUP_DIR, ...) are defined in windows-setup.ps1 and MUST NOT be redefined.
 #
@@ -1688,11 +1722,27 @@ $script:TWEAK_REG_KEYS = @(
     'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon',       # auto-login
     'HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting',          # error reporting
     'HKLM\SOFTWARE\Policies\Microsoft\Windows\StorageSense',            # storage sense policy
-    'HKLM\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName'   # hostname
+    'HKLM\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName',  # hostname
+    # --- Explorer / UI tweaks (the ported .reg pack) --------------------------
+    # Only the exact keys these tweaks touch: HKCU\Software\Classes\CLSID as a
+    # whole is far too large to export on every run.
+    'HKCU\Software\Classes\CLSID\{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}',   # nav pane: Network
+    'HKCU\Software\Classes\CLSID\{B4FB3F98-C1EA-428d-A78A-D1F5659CBA93}',   # nav pane: HomeGroup
+    'HKCU\Software\Classes\CLSID\{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}',   # nav pane: Gallery (Win11)
+    'HKCU\Software\Classes\CLSID\{f874310e-b6b7-47dc-bc84-b9e6b38f5903}',   # nav pane: Home (Win11)
+    'HKCU\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}',   # Win11 classic context menu
+    'HKCU\SOFTWARE\Policies\Microsoft\Windows\Explorer',                    # action center + search suggestions (user)
+    'HKLM\SOFTWARE\Policies\Microsoft\Windows\Explorer',                    # action center (machine)
+    'HKLM\SOFTWARE\Policies\Microsoft\Windows\Personalization',             # lock screen
+    'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace',              # This PC folders / 3D Objects
+    'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\DelegateFolders', # nav pane: removable drives
+    'HKLM\SOFTWARE\Microsoft\Windows Photo Viewer\Capabilities\FileAssociations',                # classic Photo Viewer
+    'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters',# prefetch
+    'HKU\.DEFAULT\Control Panel\Keyboard'                               # NumLock at the logon screen
 )
 
 #===============================================================================
-# BACKUP / RESTORE (§4.6) - System Restore point + registry export
+# BACKUP / RESTORE (sec. 4.6) - System Restore point + registry export
 #===============================================================================
 
 # Create a System Restore point AND export every touched registry key into a new
@@ -1739,6 +1789,15 @@ function Save-TweakBackup {
     }
 
     return $backupPath
+}
+
+# Both tweak groups back up before touching anything; run it at most once per
+# session so a combined run does not create two restore points.
+$script:TweakBackupDone = $false
+function Save-TweakBackupOnce {
+    if ($script:TweakBackupDone) { return }
+    $script:TweakBackupDone = $true
+    Save-TweakBackup | Out-Null
 }
 
 # List backup folders under $script:BACKUP_DIR (timestamps + contents) and any
@@ -1872,7 +1931,7 @@ function Restore-Backup {
 }
 
 #===============================================================================
-# TWEAK APPLY FUNCTIONS (§4.4) - each = one row of the mapping table
+# TWEAK APPLY FUNCTIONS (sec. 4.4) - each = one row of the mapping table
 #===============================================================================
 
 # Update System: winget upgrade --all. Mirrors "sudo apt update && upgrade".
@@ -2579,7 +2638,741 @@ function Test-TweakApplied {
 }
 
 #===============================================================================
-# Debloat — remove pre-installed Windows bloat.
+# EXPLORER / UI TWEAKS - the .reg + .cmd collection, ported to native calls.
+#
+# Design notes:
+#   * Every tweak is a two-way toggle (Apply / Revert) because the source pack
+#     shipped both directions (KALDIR/GERI YUKLE, Disable/Enable, Add/Remove).
+#   * Tweaks that DELETE registry keys export them to
+#     $script:BACKUP_DIR\ui-tweaks\<key>\ first, so Revert re-imports the exact
+#     original instead of guessing at Windows' default values. If a key was
+#     deleted outside this script there is nothing to import and Revert says so.
+#   * reg.exe is used for delete/export (it is literal about key names such as
+#     the HKCR "*" class); the PowerShell registry provider is used for reads and
+#     value writes because it is far faster in the detection loop.
+#===============================================================================
+
+$script:UI_TWEAK_BACKUP_ROOT = Join-Path $script:BACKUP_DIR 'ui-tweaks'
+
+# reg.exe hive notation -> PowerShell provider path (covers HKCR / HKU too).
+function ConvertTo-RegProviderPath {
+    param([Parameter(Mandatory)][string]$RegPath)
+    $p = $RegPath
+    $p = $p -replace '^HKLM\\', 'HKEY_LOCAL_MACHINE\'
+    $p = $p -replace '^HKCU\\', 'HKEY_CURRENT_USER\'
+    $p = $p -replace '^HKCR\\', 'HKEY_CLASSES_ROOT\'
+    $p = $p -replace '^HKU\\',  'HKEY_USERS\'
+    return "Registry::$p"
+}
+
+function Test-UiRegKey {
+    param([Parameter(Mandatory)][string]$RegPath)
+    try { return [bool](Test-Path -LiteralPath (ConvertTo-RegProviderPath $RegPath)) } catch { return $false }
+}
+
+# Read a single value; $null when the key or the value is absent.
+function Get-UiRegValue {
+    param([Parameter(Mandatory)][string]$RegPath, [Parameter(Mandatory)][string]$Name)
+    try {
+        $prov = ConvertTo-RegProviderPath $RegPath
+        if (-not (Test-Path -LiteralPath $prov)) { return $null }
+        return (Get-ItemProperty -LiteralPath $prov -Name $Name -ErrorAction SilentlyContinue).$Name
+    } catch { return $null }
+}
+
+# Write a single value, creating the key when needed.
+function Set-UiRegValue {
+    param(
+        [Parameter(Mandatory)][string]$RegPath,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)]$Value,
+        [ValidateSet('DWord', 'String')][string]$Type = 'DWord'
+    )
+    try {
+        $prov = ConvertTo-RegProviderPath $RegPath
+        if (-not (Test-Path -LiteralPath $prov)) { New-Item -Path $prov -Force | Out-Null }
+        New-ItemProperty -LiteralPath $prov -Name $Name -Value $Value -PropertyType $Type -Force | Out-Null
+        return $true
+    } catch {
+        Write-LogWarning "Could not set $RegPath\$Name : $($_.Exception.Message)"
+        return $false
+    }
+}
+
+# Delete a single value (no-op when it is already gone).
+function Remove-UiRegValue {
+    param([Parameter(Mandatory)][string]$RegPath, [Parameter(Mandatory)][string]$Name)
+    try {
+        $prov = ConvertTo-RegProviderPath $RegPath
+        if (Test-Path -LiteralPath $prov) { Remove-ItemProperty -LiteralPath $prov -Name $Name -ErrorAction SilentlyContinue }
+        return $true
+    } catch { return $false }
+}
+
+# Create a key, optionally with a default ("@=") value.
+function New-UiRegKey {
+    param([Parameter(Mandatory)][string]$RegPath, [string]$DefaultValue)
+    try {
+        $prov = ConvertTo-RegProviderPath $RegPath
+        if (-not (Test-Path -LiteralPath $prov)) { New-Item -Path $prov -Force | Out-Null }
+        if ($PSBoundParameters.ContainsKey('DefaultValue')) {
+            New-ItemProperty -LiteralPath $prov -Name '(default)' -Value $DefaultValue -PropertyType String -Force | Out-Null
+        }
+        return $true
+    } catch {
+        Write-LogWarning "Could not create $RegPath : $($_.Exception.Message)"
+        return $false
+    }
+}
+
+# Export a key under the tweak's backup folder, then delete it recursively.
+# Idempotent: a key that is already gone is a silent success.
+function Remove-UiRegKey {
+    param([Parameter(Mandatory)][string]$TweakKey, [Parameter(Mandatory)][string]$RegPath)
+    & reg.exe query $RegPath > $null 2>&1
+    if ($LASTEXITCODE -ne 0) { return $true }
+
+    try {
+        $dir = Join-Path $script:UI_TWEAK_BACKUP_ROOT $TweakKey
+        if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        $file = Join-Path $dir (($RegPath -replace '[\\:\*\s\{\}]', '_') + '.reg')
+        & reg.exe export $RegPath $file /y > $null 2>&1
+    } catch {
+        Write-LogWarning "  Could not export $RegPath before deleting it: $($_.Exception.Message)"
+    }
+
+    & reg.exe delete $RegPath /f > $null 2>&1
+    if ($LASTEXITCODE -eq 0) { return $true }
+    Write-LogWarning "Could not delete $RegPath (the key may be owned by TrustedInstaller)."
+    return $false
+}
+
+# Re-import everything this script exported for a tweak. $false when there is
+# no export to restore from.
+function Restore-UiRegBackup {
+    param([Parameter(Mandatory)][string]$TweakKey)
+    $dir = Join-Path $script:UI_TWEAK_BACKUP_ROOT $TweakKey
+    if (-not (Test-Path -LiteralPath $dir)) { return $false }
+    $files = @(Get-ChildItem -LiteralPath $dir -Filter '*.reg' -ErrorAction SilentlyContinue)
+    if ($files.Count -eq 0) { return $false }
+    $ok = $false
+    foreach ($f in $files) {
+        & reg.exe import $f.FullName > $null 2>&1
+        if ($LASTEXITCODE -eq 0) { $ok = $true } else { Write-LogWarning "  Could not import $($f.Name)" }
+    }
+    return $ok
+}
+
+# Explorer picks up namespace / context-menu changes only after a restart.
+# Windows relaunches it automatically when it is killed from an elevated shell.
+function Restart-Explorer {
+    try {
+        if (Get-Process -Name explorer -ErrorAction SilentlyContinue) {
+            Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+        }
+    } catch { }
+}
+
+#-------------------------------------------------------------------------------
+# This PC - the six user folders and 3D Objects
+#-------------------------------------------------------------------------------
+# Both the Windows 8.1-era and the Windows 10-era CLSID exist for most folders;
+# the source .reg pack deletes both, so we do too.
+$script:THISPC_FOLDER_CLSIDS = @(
+    '{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}'   # Desktop
+    '{A8CDFF1C-4878-43be-B5FD-F8091C1C60D0}'   # Documents
+    '{d3162b92-9365-467a-956b-92703aca08af}'   # Documents (alt)
+    '{374DE290-123F-4565-9164-39C4925E467B}'   # Downloads
+    '{088e3905-0323-4b02-9826-5d99428e115f}'   # Downloads (alt)
+    '{1CF1260C-4DD0-4ebb-811F-33C572699FDE}'   # Music
+    '{3dfdf296-dbec-4fb4-81d1-6a3438bcf4de}'   # Music (alt)
+    '{3ADD1653-EB32-4cb0-BBD7-DFA0ABB5ACCA}'   # Pictures
+    '{24ad3ad4-a569-4530-98e1-ab02f9417aa8}'   # Pictures (alt)
+    '{A0953C92-50DC-43bf-BE83-3742FED03C9C}'   # Videos
+    '{f86fa3ab-70d2-4fc7-9c99-fcbf05467f3a}'   # Videos (alt)
+)
+$script:THISPC_3D_CLSID    = '{0DB7E03F-FC29-4DC6-9020-FF41B59E513A}'
+$script:MYCOMPUTER_NS_ROOTS = @(
+    'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace'
+    'HKLM\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace'
+)
+
+function Remove-ThisPcUserFolders {
+    Write-LogInfo "Removing Desktop/Documents/Downloads/Music/Pictures/Videos from This PC..."
+    foreach ($root in $script:MYCOMPUTER_NS_ROOTS) {
+        foreach ($clsid in $script:THISPC_FOLDER_CLSIDS) {
+            Remove-UiRegKey -TweakKey 'thispc-folders' -RegPath "$root\$clsid" | Out-Null
+        }
+    }
+    Restart-Explorer
+    Write-LogSuccess "This PC now shows drives only (Explorer restarted)."
+    return $true
+}
+
+function Restore-ThisPcUserFolders {
+    Write-LogInfo "Restoring the user folders under This PC..."
+    if (-not (Restore-UiRegBackup 'thispc-folders')) {
+        # No export to import (tweak applied outside this script): recreate the
+        # namespace keys - Explorer only needs the key itself to exist.
+        foreach ($root in $script:MYCOMPUTER_NS_ROOTS) {
+            foreach ($clsid in $script:THISPC_FOLDER_CLSIDS) { New-UiRegKey "$root\$clsid" | Out-Null }
+        }
+    }
+    Restart-Explorer
+    Write-LogSuccess "This PC lists the user folders again (Explorer restarted)."
+    return $true
+}
+
+function Remove-3DObjectsFolder {
+    Write-LogInfo "Removing the 3D Objects folder from This PC..."
+    foreach ($root in $script:MYCOMPUTER_NS_ROOTS) {
+        Remove-UiRegKey -TweakKey 'thispc-3d' -RegPath "$root\$($script:THISPC_3D_CLSID)" | Out-Null
+    }
+    Restart-Explorer
+    Write-LogSuccess "3D Objects removed from This PC (Explorer restarted)."
+    return $true
+}
+
+function Restore-3DObjectsFolder {
+    Write-LogInfo "Restoring the 3D Objects folder under This PC..."
+    if (-not (Restore-UiRegBackup 'thispc-3d')) {
+        foreach ($root in $script:MYCOMPUTER_NS_ROOTS) { New-UiRegKey "$root\$($script:THISPC_3D_CLSID)" | Out-Null }
+    }
+    Restart-Explorer
+    Write-LogSuccess "3D Objects restored (Explorer restarted)."
+    return $true
+}
+
+#-------------------------------------------------------------------------------
+# Navigation pane entries (Network / HomeGroup / Gallery / Home)
+#-------------------------------------------------------------------------------
+# All four share one shape: a per-user CLSID key whose System.IsPinnedToNameSpaceTree
+# value decides whether Explorer shows the entry.
+$script:NAV_CLSID_NETWORK   = '{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}'
+$script:NAV_CLSID_HOMEGROUP = '{B4FB3F98-C1EA-428d-A78A-D1F5659CBA93}'
+$script:NAV_CLSID_GALLERY   = '{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}'
+$script:NAV_CLSID_HOME      = '{f874310e-b6b7-47dc-bc84-b9e6b38f5903}'
+
+function Set-NavPaneItem {
+    param(
+        [Parameter(Mandatory)][string]$Clsid,
+        [Parameter(Mandatory)][bool]$Pinned,
+        [string]$DefaultValue
+    )
+    $path = "HKCU\Software\Classes\CLSID\$Clsid"
+    if ($DefaultValue) { New-UiRegKey $path $DefaultValue | Out-Null }
+    $v = 0; if ($Pinned) { $v = 1 }
+    $ok = Set-UiRegValue -RegPath $path -Name 'System.IsPinnedToNameSpaceTree' -Value $v -Type DWord
+    Restart-Explorer
+    return $ok
+}
+
+function Test-NavPaneHidden {
+    param([Parameter(Mandatory)][string]$Clsid)
+    $v = Get-UiRegValue -RegPath "HKCU\Software\Classes\CLSID\$Clsid" -Name 'System.IsPinnedToNameSpaceTree'
+    return ($null -ne $v -and [int]$v -eq 0)
+}
+
+function Remove-NavPaneNetwork {
+    Write-LogInfo "Hiding Network in the Explorer navigation pane..."
+    $ok = Set-NavPaneItem -Clsid $script:NAV_CLSID_NETWORK -Pinned $false
+    if ($ok) { Write-LogSuccess "Network hidden (Explorer restarted)." }
+    return $ok
+}
+function Restore-NavPaneNetwork {
+    Write-LogInfo "Showing Network in the Explorer navigation pane..."
+    $ok = Set-NavPaneItem -Clsid $script:NAV_CLSID_NETWORK -Pinned $true
+    if ($ok) { Write-LogSuccess "Network shown (Explorer restarted)." }
+    return $ok
+}
+
+function Remove-NavPaneHomeGroup {
+    Write-LogInfo "Hiding HomeGroup in the Explorer navigation pane..."
+    $ok = Set-NavPaneItem -Clsid $script:NAV_CLSID_HOMEGROUP -Pinned $false
+    if ($ok) { Write-LogSuccess "HomeGroup hidden (Explorer restarted). Note: Windows 11 has no HomeGroup, so this is a no-op there." }
+    return $ok
+}
+function Restore-NavPaneHomeGroup {
+    Write-LogInfo "Showing HomeGroup in the Explorer navigation pane..."
+    $ok = Set-NavPaneItem -Clsid $script:NAV_CLSID_HOMEGROUP -Pinned $true
+    if ($ok) { Write-LogSuccess "HomeGroup shown (Explorer restarted)." }
+    return $ok
+}
+
+function Remove-NavPaneGallery {
+    Write-LogInfo "Hiding Gallery in the Explorer navigation pane (Windows 11)..."
+    $ok = Set-NavPaneItem -Clsid $script:NAV_CLSID_GALLERY -Pinned $false
+    if ($ok) { Write-LogSuccess "Gallery hidden (Explorer restarted)." }
+    return $ok
+}
+function Restore-NavPaneGallery {
+    Write-LogInfo "Showing Gallery in the Explorer navigation pane (Windows 11)..."
+    $ok = Set-NavPaneItem -Clsid $script:NAV_CLSID_GALLERY -Pinned $true
+    if ($ok) { Write-LogSuccess "Gallery shown (Explorer restarted)." }
+    return $ok
+}
+
+function Remove-NavPaneHome {
+    Write-LogInfo "Hiding Home in the Explorer navigation pane (Windows 11)..."
+    $ok = Set-NavPaneItem -Clsid $script:NAV_CLSID_HOME -Pinned $false -DefaultValue 'CLSID_MSGraphHomeFolder'
+    if ($ok) { Write-LogSuccess "Home hidden (Explorer restarted)." }
+    return $ok
+}
+function Restore-NavPaneHome {
+    Write-LogInfo "Showing Home in the Explorer navigation pane (Windows 11)..."
+    $ok = Set-NavPaneItem -Clsid $script:NAV_CLSID_HOME -Pinned $true -DefaultValue 'CLSID_MSGraphHomeFolder'
+    if ($ok) { Write-LogSuccess "Home shown (Explorer restarted)." }
+    return $ok
+}
+
+#-------------------------------------------------------------------------------
+# Navigation pane: the duplicate removable-drive entries (DelegateFolders)
+#-------------------------------------------------------------------------------
+$script:NAV_DRIVES_KEYS = @(
+    'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\DelegateFolders\{F5FB2C77-0E2F-4A16-A381-3E560C68BC83}'
+    'HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\DelegateFolders\{F5FB2C77-0E2F-4A16-A381-3E560C68BC83}'
+)
+
+function Remove-NavPaneDrives {
+    Write-LogInfo "Removing the duplicate removable-drive entries from the navigation pane..."
+    foreach ($k in $script:NAV_DRIVES_KEYS) { Remove-UiRegKey -TweakKey 'nav-drives' -RegPath $k | Out-Null }
+    Restart-Explorer
+    Write-LogSuccess "Removable drives are no longer listed twice (Explorer restarted)."
+    return $true
+}
+function Restore-NavPaneDrives {
+    Write-LogInfo "Restoring the removable-drive entries in the navigation pane..."
+    if (-not (Restore-UiRegBackup 'nav-drives')) {
+        foreach ($k in $script:NAV_DRIVES_KEYS) { New-UiRegKey $k 'Removable Drives' | Out-Null }
+    }
+    Restart-Explorer
+    Write-LogSuccess "Removable drives restored (Explorer restarted)."
+    return $true
+}
+
+#-------------------------------------------------------------------------------
+# Quick Access: frequent folders
+#-------------------------------------------------------------------------------
+$script:QUICK_ACCESS_KEY = 'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer'
+
+function Hide-QuickAccessFrequent {
+    Write-LogInfo "Hiding frequently-used folders in Quick Access..."
+    $ok = Set-UiRegValue -RegPath $script:QUICK_ACCESS_KEY -Name 'ShowFrequent' -Value 0
+    Restart-Explorer
+    if ($ok) { Write-LogSuccess "Frequent folders hidden (Explorer restarted)." }
+    return $ok
+}
+function Show-QuickAccessFrequent {
+    Write-LogInfo "Showing frequently-used folders in Quick Access..."
+    $ok = Set-UiRegValue -RegPath $script:QUICK_ACCESS_KEY -Name 'ShowFrequent' -Value 1
+    Restart-Explorer
+    if ($ok) { Write-LogSuccess "Frequent folders shown (Explorer restarted)." }
+    return $ok
+}
+
+#-------------------------------------------------------------------------------
+# Windows 11: classic (Windows 10 style) right-click menu
+#-------------------------------------------------------------------------------
+$script:CLASSIC_CTX_KEY = 'HKCU\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}'
+
+function Enable-ClassicContextMenu {
+    Write-LogInfo "Restoring the classic (full) right-click menu..."
+    $ok = New-UiRegKey "$($script:CLASSIC_CTX_KEY)\InprocServer32" ''
+    Restart-Explorer
+    if ($ok) { Write-LogSuccess "Classic context menu restored (Explorer restarted)." }
+    return $ok
+}
+function Disable-ClassicContextMenu {
+    Write-LogInfo "Restoring the Windows 11 compact right-click menu..."
+    try {
+        $prov = ConvertTo-RegProviderPath $script:CLASSIC_CTX_KEY
+        if (Test-Path -LiteralPath $prov) { Remove-Item -LiteralPath $prov -Recurse -Force -ErrorAction Stop }
+        Restart-Explorer
+        Write-LogSuccess "Windows 11 context menu restored (Explorer restarted)."
+        return $true
+    } catch {
+        Write-LogWarning "Could not remove the classic-context-menu key: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+#-------------------------------------------------------------------------------
+# Shell-extension removals (Share with / Sharing tab / Previous Versions)
+#-------------------------------------------------------------------------------
+$script:CTX_SHARE_KEYS = @(
+    'HKCR\*\shellex\ContextMenuHandlers\Sharing'
+    'HKCR\Directory\Background\shellex\ContextMenuHandlers\Sharing'
+    'HKCR\Directory\shellex\ContextMenuHandlers\Sharing'
+    'HKCR\Drive\shellex\ContextMenuHandlers\Sharing'
+    'HKCR\LibraryFolder\background\shellex\ContextMenuHandlers\Sharing'
+    'HKCR\UserLibraryFolder\shellex\ContextMenuHandlers\Sharing'
+)
+$script:CTX_SHARING_TAB_KEYS = @(
+    'HKCR\Directory\shellex\PropertySheetHandlers\Sharing'
+    'HKCR\Drive\shellex\PropertySheetHandlers\Sharing'
+)
+$script:CTX_PREVVER_KEYS = @(
+    'HKCR\AllFilesystemObjects\shellex\ContextMenuHandlers\{596AB062-B4D2-4215-9F74-E9109B0A8153}'
+    'HKCR\CLSID\{450D8FBA-AD25-11D0-98A8-0800361B1103}\shellex\ContextMenuHandlers\{596AB062-B4D2-4215-9F74-E9109B0A8153}'
+    'HKCR\Directory\shellex\ContextMenuHandlers\{596AB062-B4D2-4215-9F74-E9109B0A8153}'
+    'HKCR\Drive\shellex\ContextMenuHandlers\{596AB062-B4D2-4215-9F74-E9109B0A8153}'
+    'HKCR\AllFilesystemObjects\shellex\PropertySheetHandlers\{596AB062-B4D2-4215-9F74-E9109B0A8153}'
+    'HKCR\CLSID\{450D8FBA-AD25-11D0-98A8-0800361B1103}\shellex\PropertySheetHandlers\{596AB062-B4D2-4215-9F74-E9109B0A8153}'
+    'HKCR\Directory\shellex\PropertySheetHandlers\{596AB062-B4D2-4215-9F74-E9109B0A8153}'
+    'HKCR\Drive\shellex\PropertySheetHandlers\{596AB062-B4D2-4215-9F74-E9109B0A8153}'
+)
+
+function Remove-ShellExKeys {
+    param([Parameter(Mandatory)][string]$TweakKey, [Parameter(Mandatory)][string[]]$Keys)
+    $ok = $true
+    foreach ($k in $Keys) {
+        if (-not (Remove-UiRegKey -TweakKey $TweakKey -RegPath $k)) { $ok = $false }
+    }
+    Restart-Explorer
+    return $ok
+}
+
+function Restore-ShellExKeys {
+    param([Parameter(Mandatory)][string]$TweakKey)
+    if (Restore-UiRegBackup $TweakKey) {
+        Restart-Explorer
+        return $true
+    }
+    Write-LogWarning "No export found under $($script:UI_TWEAK_BACKUP_ROOT)\$TweakKey - these shell-extension keys can only be put back from a backup taken when the tweak was applied."
+    return $false
+}
+
+function Remove-ShareContextMenu {
+    Write-LogInfo "Removing the 'Share with' entry from the right-click menu..."
+    $ok = Remove-ShellExKeys -TweakKey 'ctx-share' -Keys $script:CTX_SHARE_KEYS
+    if ($ok) { Write-LogSuccess "'Share with' removed from the context menu (Explorer restarted)." }
+    return $ok
+}
+function Restore-ShareContextMenu {
+    Write-LogInfo "Restoring the 'Share with' context-menu entry..."
+    $ok = Restore-ShellExKeys -TweakKey 'ctx-share'
+    if ($ok) { Write-LogSuccess "'Share with' restored (Explorer restarted)." }
+    return $ok
+}
+
+function Remove-SharingPropertyTab {
+    Write-LogInfo "Removing the Sharing tab from the Properties window..."
+    $ok = Remove-ShellExKeys -TweakKey 'ctx-sharing-tab' -Keys $script:CTX_SHARING_TAB_KEYS
+    if ($ok) { Write-LogSuccess "Sharing tab removed (Explorer restarted)." }
+    return $ok
+}
+function Restore-SharingPropertyTab {
+    Write-LogInfo "Restoring the Sharing tab in the Properties window..."
+    $ok = Restore-ShellExKeys -TweakKey 'ctx-sharing-tab'
+    if ($ok) { Write-LogSuccess "Sharing tab restored (Explorer restarted)." }
+    return $ok
+}
+
+function Remove-PreviousVersions {
+    Write-LogInfo "Removing 'Previous Versions' from the context menu and the Properties window..."
+    $ok = Remove-ShellExKeys -TweakKey 'ctx-prev-versions' -Keys $script:CTX_PREVVER_KEYS
+    if ($ok) { Write-LogSuccess "'Previous Versions' removed (Explorer restarted)." }
+    return $ok
+}
+function Restore-PreviousVersions {
+    Write-LogInfo "Restoring 'Previous Versions'..."
+    $ok = Restore-ShellExKeys -TweakKey 'ctx-prev-versions'
+    if ($ok) { Write-LogSuccess "'Previous Versions' restored (Explorer restarted)." }
+    return $ok
+}
+
+#-------------------------------------------------------------------------------
+# Action Center / notification centre
+#-------------------------------------------------------------------------------
+$script:ACTION_CENTER_KEY_HKCU = 'HKCU\SOFTWARE\Policies\Microsoft\Windows\Explorer'
+$script:ACTION_CENTER_KEY_HKLM = 'HKLM\SOFTWARE\Policies\Microsoft\Windows\Explorer'
+
+function Disable-ActionCenter {
+    Write-LogInfo "Disabling the Action Center / notification centre..."
+    $a = Set-UiRegValue -RegPath $script:ACTION_CENTER_KEY_HKCU -Name 'DisableNotificationCenter' -Value 1
+    $b = Set-UiRegValue -RegPath $script:ACTION_CENTER_KEY_HKLM -Name 'DisableNotificationCenter' -Value 1
+    Restart-Explorer
+    if ($a -and $b) { Write-LogSuccess "Action Center disabled (Explorer restarted; sign out if the icon lingers)." }
+    return ($a -and $b)
+}
+function Enable-ActionCenter {
+    Write-LogInfo "Re-enabling the Action Center / notification centre..."
+    Remove-UiRegValue -RegPath $script:ACTION_CENTER_KEY_HKCU -Name 'DisableNotificationCenter' | Out-Null
+    Remove-UiRegValue -RegPath $script:ACTION_CENTER_KEY_HKLM -Name 'DisableNotificationCenter' | Out-Null
+    Restart-Explorer
+    Write-LogSuccess "Action Center re-enabled (Explorer restarted)."
+    return $true
+}
+
+#-------------------------------------------------------------------------------
+# Lock screen
+#-------------------------------------------------------------------------------
+$script:LOCKSCREEN_POLICY_KEY = 'HKLM\SOFTWARE\Policies\Microsoft\Windows\Personalization'
+$script:LOCKSCREEN_SESSION_KEY = 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI\SessionData'
+
+function Disable-LockScreen {
+    Write-LogInfo "Disabling the lock screen for all users..."
+    $ok = Set-UiRegValue -RegPath $script:LOCKSCREEN_POLICY_KEY -Name 'NoLockScreen' -Value 1
+    if ($ok) { Write-LogSuccess "Lock screen disabled (takes effect at the next lock/sign-in)." }
+    return $ok
+}
+function Enable-LockScreen {
+    Write-LogInfo "Re-enabling the lock screen..."
+    Remove-UiRegValue -RegPath $script:LOCKSCREEN_POLICY_KEY -Name 'NoLockScreen' | Out-Null
+    Set-UiRegValue -RegPath $script:LOCKSCREEN_SESSION_KEY -Name 'AllowLockScreen' -Value 1 | Out-Null
+    Write-LogSuccess "Lock screen re-enabled."
+    return $true
+}
+
+#-------------------------------------------------------------------------------
+# Search box: web suggestions
+#-------------------------------------------------------------------------------
+$script:SEARCH_POLICY_KEY = 'HKCU\Software\Policies\Microsoft\Windows\Explorer'
+
+function Disable-SearchBoxSuggestions {
+    Write-LogInfo "Disabling web suggestions in the search box..."
+    $ok = Set-UiRegValue -RegPath $script:SEARCH_POLICY_KEY -Name 'DisableSearchBoxSuggestions' -Value 1
+    Restart-Explorer
+    if ($ok) { Write-LogSuccess "Search box web suggestions disabled (Explorer restarted)." }
+    return $ok
+}
+function Enable-SearchBoxSuggestions {
+    Write-LogInfo "Re-enabling web suggestions in the search box..."
+    $ok = Set-UiRegValue -RegPath $script:SEARCH_POLICY_KEY -Name 'DisableSearchBoxSuggestions' -Value 0
+    Restart-Explorer
+    if ($ok) { Write-LogSuccess "Search box web suggestions re-enabled (Explorer restarted)." }
+    return $ok
+}
+
+#-------------------------------------------------------------------------------
+# NumLock at boot
+#-------------------------------------------------------------------------------
+# .DEFAULT covers the logon screen only; without the matching HKCU value the
+# state flips back right after sign-in, which is why both are written here.
+$script:NUMLOCK_KEY_DEFAULT = 'HKU\.DEFAULT\Control Panel\Keyboard'
+$script:NUMLOCK_KEY_USER    = 'HKCU\Control Panel\Keyboard'
+
+function Enable-NumLockAtBoot {
+    Write-LogInfo "Turning NumLock on at the logon screen and after sign-in..."
+    $a = Set-UiRegValue -RegPath $script:NUMLOCK_KEY_DEFAULT -Name 'InitialKeyboardIndicators' -Value '2' -Type String
+    $b = Set-UiRegValue -RegPath $script:NUMLOCK_KEY_USER    -Name 'InitialKeyboardIndicators' -Value '2' -Type String
+    if ($a -and $b) {
+        Write-LogSuccess "NumLock will be on at boot."
+        Write-LogInfo "If Fast Startup is enabled, shut down fully once (or disable it) for this to stick."
+    }
+    return ($a -and $b)
+}
+function Disable-NumLockAtBoot {
+    Write-LogInfo "Turning NumLock off at the logon screen and after sign-in..."
+    $a = Set-UiRegValue -RegPath $script:NUMLOCK_KEY_DEFAULT -Name 'InitialKeyboardIndicators' -Value '0' -Type String
+    $b = Set-UiRegValue -RegPath $script:NUMLOCK_KEY_USER    -Name 'InitialKeyboardIndicators' -Value '0' -Type String
+    if ($a -and $b) { Write-LogSuccess "NumLock will be off at boot." }
+    return ($a -and $b)
+}
+
+#-------------------------------------------------------------------------------
+# Superfetch (SysMain) + Prefetch
+#-------------------------------------------------------------------------------
+$script:PREFETCH_KEY = 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters'
+
+function Disable-SuperfetchPrefetch {
+    Write-LogInfo "Disabling Superfetch (SysMain) and Prefetch..."
+    try {
+        $svc = Get-Service -Name SysMain -ErrorAction SilentlyContinue
+        if ($svc) {
+            if ($svc.Status -eq 'Running') { Stop-Service -Name SysMain -Force -ErrorAction SilentlyContinue }
+            Set-Service -Name SysMain -StartupType Disabled -ErrorAction SilentlyContinue
+        } else {
+            Write-LogInfo "  The SysMain service is not present on this system; only the Prefetch policy is applied."
+        }
+    } catch {
+        Write-LogWarning "Could not stop/disable SysMain: $($_.Exception.Message)"
+    }
+
+    $ok = Set-UiRegValue -RegPath $script:PREFETCH_KEY -Name 'EnablePrefetcher' -Value 0
+
+    try {
+        $pf = Join-Path $env:SystemRoot 'Prefetch'
+        if (Test-Path -LiteralPath $pf) {
+            Get-ChildItem -LiteralPath $pf -File -Force -ErrorAction SilentlyContinue |
+                Remove-Item -Force -ErrorAction SilentlyContinue
+        }
+    } catch { }
+
+    if ($ok) {
+        Write-LogSuccess "Superfetch and Prefetch disabled; the Prefetch cache was cleared."
+        Write-LogInfo "Recommended on SSD/NVMe only - on a spinning disk this can slow app launches."
+    }
+    return $ok
+}
+
+function Enable-SuperfetchPrefetch {
+    Write-LogInfo "Re-enabling Superfetch (SysMain) and Prefetch..."
+    try {
+        $svc = Get-Service -Name SysMain -ErrorAction SilentlyContinue
+        if ($svc) {
+            Set-Service -Name SysMain -StartupType Automatic -ErrorAction SilentlyContinue
+            Start-Service -Name SysMain -ErrorAction SilentlyContinue
+        }
+    } catch {
+        Write-LogWarning "Could not start SysMain: $($_.Exception.Message)"
+    }
+    $ok = Set-UiRegValue -RegPath $script:PREFETCH_KEY -Name 'EnablePrefetcher' -Value 3
+    if ($ok) { Write-LogSuccess "Superfetch and Prefetch re-enabled." }
+    return $ok
+}
+
+#-------------------------------------------------------------------------------
+# Classic Windows Photo Viewer
+#-------------------------------------------------------------------------------
+$script:PHOTOVIEWER_KEY = 'HKLM\SOFTWARE\Microsoft\Windows Photo Viewer\Capabilities\FileAssociations'
+$script:PHOTOVIEWER_EXT = @('.tif', '.tiff', '.png', '.bmp', '.jpeg', '.jpg', '.ico')
+
+function Restore-WindowsPhotoViewer {
+    Write-LogInfo "Re-registering the classic Windows Photo Viewer for common image types..."
+    $ok = $true
+    foreach ($ext in $script:PHOTOVIEWER_EXT) {
+        if (-not (Set-UiRegValue -RegPath $script:PHOTOVIEWER_KEY -Name $ext -Value 'PhotoViewer.FileAssoc.Tiff' -Type String)) { $ok = $false }
+    }
+    if ($ok) {
+        Write-LogSuccess "Windows Photo Viewer registered for: $($script:PHOTOVIEWER_EXT -join ', ')"
+        Write-LogInfo "It now appears under right-click > Open with; pick it once per file type (or in Settings > Default apps)."
+    }
+    return $ok
+}
+function Remove-WindowsPhotoViewer {
+    Write-LogInfo "Unregistering the classic Windows Photo Viewer..."
+    foreach ($ext in $script:PHOTOVIEWER_EXT) {
+        Remove-UiRegValue -RegPath $script:PHOTOVIEWER_KEY -Name $ext | Out-Null
+    }
+    Write-LogSuccess "Windows Photo Viewer file associations removed."
+    return $true
+}
+
+#-------------------------------------------------------------------------------
+# One-shot maintenance actions (no revert)
+#-------------------------------------------------------------------------------
+function Reset-IconCache {
+    Write-LogInfo "Rebuilding the Explorer icon cache (Explorer restarts - save your work first)..."
+    try { & ie4uinit.exe -show 2>$null | Out-Null } catch { }
+    try {
+        Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+        $lad = $env:LOCALAPPDATA
+        Remove-Item -LiteralPath (Join-Path $lad 'IconCache.db') -Force -ErrorAction SilentlyContinue
+        Get-ChildItem -Path (Join-Path $lad 'Microsoft\Windows\Explorer') -Filter 'iconcache*' -Force -ErrorAction SilentlyContinue |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+    } catch {
+        Write-LogWarning "Icon cache cleanup hit an error: $($_.Exception.Message)"
+    }
+    try { Start-Process explorer.exe -ErrorAction SilentlyContinue } catch { }
+    Write-LogSuccess "Icon cache rebuilt (Explorer restarted)."
+    return $true
+}
+
+function Clear-DnsCache {
+    Write-LogWarning "This releases and renews the DHCP lease - a remote session (RDP/VNC/AnyDesk/RustDesk) may drop for a few seconds."
+    Write-LogInfo "Flushing the DNS resolver cache and renewing the IP lease..."
+    try {
+        & ipconfig.exe /flushdns | Out-Null
+        & ipconfig.exe /release  | Out-Null
+        & ipconfig.exe /renew    | Out-Null
+        Write-LogSuccess "DNS cache flushed and the IP lease renewed."
+        return $true
+    } catch {
+        Write-LogWarning "Could not flush/renew: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+#===============================================================================
+# DETECTION - Test-UiTweakApplied (drives the [applied] marker in the submenu).
+# One-shot actions are never "applied". Defensive: any error returns $false.
+#===============================================================================
+function Test-UiTweakApplied {
+    param([Parameter(Mandatory)][string]$Key)
+    try {
+        switch ($Key) {
+            'icon-cache' { return $false }   # transient
+            'dns-flush'  { return $false }   # transient
+
+            'thispc-folders' {
+                foreach ($root in $script:MYCOMPUTER_NS_ROOTS) {
+                    foreach ($clsid in $script:THISPC_FOLDER_CLSIDS) {
+                        if (Test-UiRegKey "$root\$clsid") { return $false }
+                    }
+                }
+                return $true
+            }
+            'thispc-3d' {
+                foreach ($root in $script:MYCOMPUTER_NS_ROOTS) {
+                    if (Test-UiRegKey "$root\$($script:THISPC_3D_CLSID)") { return $false }
+                }
+                return $true
+            }
+            'nav-network'   { return (Test-NavPaneHidden $script:NAV_CLSID_NETWORK) }
+            'nav-homegroup' { return (Test-NavPaneHidden $script:NAV_CLSID_HOMEGROUP) }
+            'nav-gallery'   { return (Test-NavPaneHidden $script:NAV_CLSID_GALLERY) }
+            'nav-home'      { return (Test-NavPaneHidden $script:NAV_CLSID_HOME) }
+            'nav-drives' {
+                foreach ($k in $script:NAV_DRIVES_KEYS) { if (Test-UiRegKey $k) { return $false } }
+                return $true
+            }
+            'quick-access' {
+                $v = Get-UiRegValue -RegPath $script:QUICK_ACCESS_KEY -Name 'ShowFrequent'
+                return ($null -ne $v -and [int]$v -eq 0)
+            }
+            'classic-context' {
+                $prov = ConvertTo-RegProviderPath "$($script:CLASSIC_CTX_KEY)\InprocServer32"
+                if (-not (Test-Path -LiteralPath $prov)) { return $false }
+                $v = (Get-Item -LiteralPath $prov -ErrorAction SilentlyContinue).GetValue('')
+                return ($null -ne $v -and [string]$v -eq '')
+            }
+            'ctx-share' {
+                foreach ($k in $script:CTX_SHARE_KEYS) { if (Test-UiRegKey $k) { return $false } }
+                return $true
+            }
+            'ctx-sharing-tab' {
+                foreach ($k in $script:CTX_SHARING_TAB_KEYS) { if (Test-UiRegKey $k) { return $false } }
+                return $true
+            }
+            'ctx-prev-versions' {
+                foreach ($k in $script:CTX_PREVVER_KEYS) { if (Test-UiRegKey $k) { return $false } }
+                return $true
+            }
+            'action-center' {
+                $v = Get-UiRegValue -RegPath $script:ACTION_CENTER_KEY_HKLM -Name 'DisableNotificationCenter'
+                return ($null -ne $v -and [int]$v -eq 1)
+            }
+            'lock-screen' {
+                $v = Get-UiRegValue -RegPath $script:LOCKSCREEN_POLICY_KEY -Name 'NoLockScreen'
+                return ($null -ne $v -and [int]$v -eq 1)
+            }
+            'search-suggestions' {
+                $v = Get-UiRegValue -RegPath $script:SEARCH_POLICY_KEY -Name 'DisableSearchBoxSuggestions'
+                return ($null -ne $v -and [int]$v -eq 1)
+            }
+            'numlock' {
+                $v = Get-UiRegValue -RegPath $script:NUMLOCK_KEY_DEFAULT -Name 'InitialKeyboardIndicators'
+                return ([string]$v -eq '2')
+            }
+            'superfetch' {
+                $v = Get-UiRegValue -RegPath $script:PREFETCH_KEY -Name 'EnablePrefetcher'
+                return ($null -ne $v -and [int]$v -eq 0)
+            }
+            'photo-viewer' {
+                $v = Get-UiRegValue -RegPath $script:PHOTOVIEWER_KEY -Name '.png'
+                return ([string]$v -eq 'PhotoViewer.FileAssoc.Tiff')
+            }
+            default { return $false }
+        }
+    } catch {
+        return $false
+    }
+}
+
+#===============================================================================
+# Debloat - remove pre-installed Windows bloat.
 #
 # >>> USER-EDITABLE LIST <<<
 # The authoritative removable list is finalized by the user. Everything below is
@@ -2689,7 +3482,7 @@ function Remove-BloatItem {
 # Run debloat for the selected keys ($script:SelectedDebloat holds keys).
 #-------------------------------------------------------------------------------
 function Invoke-Debloat {
-    Write-LogStep "Debloat — removing selected items"
+    Write-LogStep "Debloat - removing selected items"
     if (-not $script:SelectedDebloat -or $script:SelectedDebloat.Count -eq 0) {
         Write-LogInfo "No debloat items selected."
         return
@@ -2806,11 +3599,11 @@ function Test-EdgeRemoved {
 }
 
 #===============================================================================
-# Interactive TUI menu — flicker-free, birebir with the source's arrow-key menu.
+# Interactive TUI menu - flicker-free, birebir with the source's arrow-key menu.
 #
 # Performance notes (these were the reported lag/flicker causes):
 #   * We redraw by moving the cursor to (0,0) and OVERWRITING padded lines every
-#     frame — NEVER Clear-Host per keypress. Clear-Host happens only on entry and
+#     frame - NEVER Clear-Host per keypress. Clear-Host happens only on entry and
 #     when returning from a sub-menu.
 #   * Status markers (installed/applied/removed) are computed ONCE before the loop
 #     (detection hits winget/registry and is slow), never per frame.
@@ -2820,6 +3613,9 @@ function Test-EdgeRemoved {
 $script:SelectedTweaks      = @()
 $script:SelectedDebloat     = @()
 $script:SelectedVSCodeExt   = @()
+# Explorer/UI tweaks are two-way, so the selection carries a direction:
+# key -> 'apply' | 'revert'.
+$script:SelectedUiTweaks    = @{}
 $script:SelectedAliases     = @()
 $script:AliasesTouched      = $false
 $script:VSCodeApplySettings = $true
@@ -2919,7 +3715,9 @@ function Get-HeaderLines {
 # Generic flicker-free arrow-key menu engine (used by the main menu and every
 # sub-menu). Mutates each row's .Selected. Returns 'confirm' or 'quit'.
 #   Row fields: Num, Label, Desc, Marker, Selected, IsGroup, OnEnter,
-#               SelectedCheck (optional scriptblock -> bool for derived rows)
+#               SelectedCheck (optional scriptblock -> bool for derived rows),
+#               Tri + State   (tri-state rows: 0 = off, 1 = apply, 2 = revert),
+#               NoRevert      (tri-state row with nothing to undo: skips state 2)
 #-------------------------------------------------------------------------------
 # ANSI SGR color codes (ConsoleColor name -> code) for the single-write renderer.
 $script:_ansi = @{ Cyan = '36'; Green = '32'; Yellow = '33'; Blue = '34'; Gray = '37'; DarkGray = '90'; White = '97'; Red = '31' }
@@ -2975,7 +3773,8 @@ function Invoke-SelectMenu {
         [System.Collections.ArrayList]$Rows,
         [scriptblock]$Summary,
         [scriptblock]$OnSelectAll,
-        [scriptblock]$OnSelectNone
+        [scriptblock]$OnSelectNone,
+        [switch]$TriMode
     )
     $cursor = 0
     $numBuf = ''
@@ -3001,10 +3800,17 @@ function Invoke-SelectMenu {
                 $segs += @{ t = ('[{0,2}] ' -f $r.Num); c = 'Blue' }
                 if ($r.IsGroup) {
                     $segs += @{ t = $(if ($sel) { '[+] ' } else { '[ ] ' }); c = $(if ($sel) { 'Green' } else { 'DarkGray' }) }
+                    $segs += @{ t = $r.Label; c = $(if ($sel) { 'Green' } else { 'White' }) }
+                } elseif ($r.Tri) {
+                    # Tri-state: 0 = leave alone, 1 = apply, 2 = revert.
+                    $st = [int]$r.State
+                    if     ($st -eq 1) { $segs += @{ t = '[x] '; c = 'Green'  }; $segs += @{ t = $r.Label; c = 'Green'  } }
+                    elseif ($st -eq 2) { $segs += @{ t = '[r] '; c = 'Yellow' }; $segs += @{ t = $r.Label; c = 'Yellow' } }
+                    else               { $segs += @{ t = '[ ] '; c = 'Gray'   }; $segs += @{ t = $r.Label; c = 'White'  } }
                 } else {
                     $segs += @{ t = $(if ($sel) { '[x] ' } else { '[ ] ' }); c = $(if ($sel) { 'Green' } else { 'Gray' }) }
+                    $segs += @{ t = $r.Label; c = $(if ($sel) { 'Green' } else { 'White' }) }
                 }
-                $segs += @{ t = $r.Label; c = $(if ($sel) { 'Green' } else { 'White' }) }
                 if ($r.Desc)   { $segs += @{ t = (' - ' + $r.Desc); c = 'DarkGray' } }
                 if ($r.Marker) { $segs += @{ t = ('  **' + $r.Marker); c = 'Yellow' } }
                 [void]$lines.Add($segs)
@@ -3012,6 +3818,7 @@ function Invoke-SelectMenu {
             [void]$lines.Add(@(@{ t = '  ---------------------------------------------------------------'; c = 'Yellow' }))
             if ($Summary) { [void]$lines.Add(@(@{ t = ('  ' + (& $Summary)); c = 'Green' })) } else { [void]$lines.Add(@(@{ t = '' })) }
             $hint = '   UP/DN move  0-9 jump  SPACE toggle  ENTER sub-menu  a all  n none  c confirm  q quit'
+            if ($TriMode) { $hint = '   UP/DN move  0-9 jump  SPACE [ ]->[x] apply->[r] revert  a all  n none  c confirm  q quit' }
             if ($numBuf) { $hint += "    #$numBuf" }
             [void]$lines.Add(@(@{ t = $hint; c = 'DarkGray' }))
 
@@ -3050,10 +3857,19 @@ function Invoke-SelectMenu {
             elseif ($key -eq 'DownArrow' -or $ch -eq 'j') { if ($cursor -lt $Rows.Count - 1) { $cursor++ } }
             elseif ($key -eq 'Spacebar' -or $key -eq 'Enter') {
                 $r = $Rows[$cursor]
-                if ($r.OnEnter) { & $r.OnEnter; $needClear = $true } else { $r.Selected = -not $r.Selected }
+                if ($r.OnEnter) {
+                    & $r.OnEnter; $needClear = $true
+                } elseif ($r.Tri) {
+                    # off -> apply -> revert -> off (rows with nothing to undo skip revert)
+                    $st = ([int]$r.State + 1) % 3
+                    if ($st -eq 2 -and $r.NoRevert) { $st = 0 }
+                    $r.State = $st
+                } else {
+                    $r.Selected = -not $r.Selected
+                }
             }
-            elseif ($ch -eq 'a') { foreach ($r in $Rows) { if (-not $r.IsGroup) { $r.Selected = $true } }; if ($OnSelectAll) { & $OnSelectAll } }
-            elseif ($ch -eq 'n') { foreach ($r in $Rows) { if (-not $r.IsGroup) { $r.Selected = $false } }; if ($OnSelectNone) { & $OnSelectNone } }
+            elseif ($ch -eq 'a') { foreach ($r in $Rows) { if (-not $r.IsGroup) { if ($r.Tri) { $r.State = 1 } else { $r.Selected = $true } } }; if ($OnSelectAll) { & $OnSelectAll } }
+            elseif ($ch -eq 'n') { foreach ($r in $Rows) { if (-not $r.IsGroup) { if ($r.Tri) { $r.State = 0 } else { $r.Selected = $false } } }; if ($OnSelectNone) { & $OnSelectNone } }
             elseif ($ch -eq 'c') { return 'confirm' }
             elseif ($ch -eq 'q' -or $key -eq 'Escape') { return 'quit' }
         }
@@ -3064,7 +3880,7 @@ function Invoke-SelectMenu {
 }
 
 #-------------------------------------------------------------------------------
-# Sub-menus — each precomputes markers once, runs the engine, writes back on confirm.
+# Sub-menus - each precomputes markers once, runs the engine, writes back on confirm.
 #-------------------------------------------------------------------------------
 function Show-RemoteSubmenu {
     $rows = New-Object System.Collections.ArrayList
@@ -3122,6 +3938,32 @@ function Show-TweaksSubmenu {
     }
 }
 
+# Explorer / UI tweaks - tri-state rows: [ ] leave alone, [x] apply, [r] revert.
+function Show-UiTweaksSubmenu {
+    $rows = New-Object System.Collections.ArrayList
+    $n = 0
+    foreach ($t in $script:UiTweaks) {
+        $n++
+        $mk = ''; if (Test-UiTweakApplied -Key $t.Key) { $mk = 'applied' }
+        $st = 0
+        if ($script:SelectedUiTweaks.ContainsKey($t.Key)) {
+            if ($script:SelectedUiTweaks[$t.Key] -eq 'revert') { $st = 2 } else { $st = 1 }
+        }
+        [void]$rows.Add(@{ Num = $n; Label = $t.Label; Desc = ''; Marker = $mk; IsGroup = $false; OnEnter = $null;
+                           Tri = $true; NoRevert = (-not $t.Revert); State = $st; Ref = $t })
+    }
+    $res = Invoke-SelectMenu -Banner 'Explorer & UI Tweaks    [x] = apply    [r] = revert' -Rows $rows -TriMode
+    if ($res -eq 'confirm') {
+        $sel = @{}
+        foreach ($r in $rows) {
+            if     ([int]$r.State -eq 1) { $sel[$r.Ref.Key] = 'apply' }
+            elseif ([int]$r.State -eq 2) { $sel[$r.Ref.Key] = 'revert' }
+        }
+        $script:SelectedUiTweaks = $sel
+        if ($sel.Count -gt 0) { $flags.UiTweaks = $true }
+    }
+}
+
 function Show-DebloatSubmenu {
     $rows = New-Object System.Collections.ArrayList
     $n = 0
@@ -3168,6 +4010,7 @@ function Show-InteractiveMenu {
     $rmInst = @($script:RemoteTools  | Where-Object { & $_.Detect }).Count
     $aiInst = @($script:AiCliTools   | Where-Object { & $_.Detect }).Count
     $twInst = @($script:WindowsTweaks| Where-Object { Test-TweakApplied -Key $_.Key }).Count
+    $uiInst = @($script:UiTweaks     | Where-Object { Test-UiTweakApplied -Key $_.Key }).Count
     $dbInst = @($script:DebloatItems | Where-Object { Test-BloatRemoved -Item $_ }).Count
     $vsInst = if (Test-VSCodeInstalled) { 'installed' } else { '' }
     Stop-Spinner $sp
@@ -3180,6 +4023,7 @@ function Show-InteractiveMenu {
         @{ k='vscode';      group='vscode';  label='VS Code';      desc='Visual Studio Code (Enter: extensions & settings)'; marker=$vsInst }
         @{ k='python';                        label='Python';       desc='Python 3' }
         @{ k='tweaks';      group='tweaks';  label='Tweaks';       desc='Windows tweaks (Enter to expand)'; marker=(Get-GroupMarkerText $twInst $script:WindowsTweaks.Count 'applied') }
+        @{ k='uitweaks';    group='uitweaks';label='Explorer & UI'; desc='This PC / nav pane / context menu / registry tweaks (Enter to expand)'; marker=(Get-GroupMarkerText $uiInst $script:UiTweaks.Count 'applied') }
         @{ k='dbeaver';                       label='DBeaver';      desc='DBeaver CE (database tool)' }
         @{ k='vlc';                           label='VLC';          desc='VLC Media Player' }
         @{ k='cloudflared';                   label='Cloudflared';  desc='Cloudflare Tunnel client' }
@@ -3201,6 +4045,7 @@ function Show-InteractiveMenu {
                 'remote'  { { Show-RemoteSubmenu } }
                 'vscode'  { { Show-VSCodeSubmenu } }
                 'tweaks'  { { Show-TweaksSubmenu } }
+                'uitweaks'{ { Show-UiTweaksSubmenu } }
                 'aicli'   { { Show-AiCliSubmenu } }
                 'debloat' { { Show-DebloatSubmenu } }
             }
@@ -3208,6 +4053,7 @@ function Show-InteractiveMenu {
                 'remote'  { { @($script:RemoteTools | Where-Object { $flags[$_.Flag] }).Count -gt 0 } }
                 'vscode'  { { [bool]$flags.VSCode -or $script:SelectedVSCodeExt.Count -gt 0 } }
                 'tweaks'  { { $script:SelectedTweaks.Count -gt 0 -or $script:SelectedAliases.Count -gt 0 } }
+                'uitweaks'{ { $script:SelectedUiTweaks.Count -gt 0 } }
                 'aicli'   { { @($script:AiCliTools | Where-Object { $flags[$_.Flag] }).Count -gt 0 } }
                 'debloat' { { $script:SelectedDebloat.Count -gt 0 } }
             }
@@ -3226,6 +4072,7 @@ function Show-InteractiveMenu {
         $rm = @($script:RemoteTools  | Where-Object { $flags[$_.Flag] } | ForEach-Object { $_.Key });   if ($rm.Count) { $parts += "Remote[$($rm -join ',')]" }
         $ai = @($script:AiCliTools   | Where-Object { $flags[$_.Flag] } | ForEach-Object { $_.Key });   if ($ai.Count) { $parts += "AI[$($ai -join ',')]" }
         if ($script:SelectedTweaks.Count)  { $parts += "Tweaks[$($script:SelectedTweaks.Count)]" }
+        if ($script:SelectedUiTweaks.Count) { $parts += "UI[$($script:SelectedUiTweaks.Count)]" }
         if ($script:SelectedDebloat.Count) { $parts += "Debloat[$($script:SelectedDebloat.Count)]" }
         if ($script:SelectedAliases.Count) { $parts += "Aliases[$($script:SelectedAliases.Count)]" }
         if ($flags.VSCode) { $parts += 'VSCode' }
@@ -3240,14 +4087,20 @@ function Show-InteractiveMenu {
         $script:SelectedDebloat   = @($script:DebloatItems  | ForEach-Object { $_.Key })
         $script:SelectedVSCodeExt = @($script:VSCodeExtensions | ForEach-Object { $_.Id })
         $script:SelectedAliases = @($script:CliAliases | ForEach-Object { $_.Key }); $script:AliasesTouched = $true
-        $flags.Tweaks = $true; $flags.Debloat = $true; $flags.VSCode = $true
+        # Reversible UI tweaks only: "select all" must not fire the one-shot
+        # actions (rebuild icon cache kills Explorer, DNS renew drops the link).
+        $ui = @{}
+        foreach ($t in $script:UiTweaks) { if ($t.Revert) { $ui[$t.Key] = 'apply' } }
+        $script:SelectedUiTweaks = $ui
+        $flags.Tweaks = $true; $flags.Debloat = $true; $flags.VSCode = $true; $flags.UiTweaks = $true
     }
     $selectNone = {
         foreach ($t in $script:AiCliTools)  { $flags[$t.Flag] = $false }
         foreach ($t in $script:RemoteTools) { $flags[$t.Flag] = $false }
         $script:SelectedTweaks = @(); $script:SelectedDebloat = @(); $script:SelectedVSCodeExt = @()
         $script:SelectedAliases = @(); $script:AliasesTouched = $true
-        $flags.Tweaks = $false; $flags.Debloat = $false; $flags.VSCode = $false
+        $script:SelectedUiTweaks = @{}
+        $flags.Tweaks = $false; $flags.Debloat = $false; $flags.VSCode = $false; $flags.UiTweaks = $false
     }
 
     $result = Invoke-SelectMenu -Header (Get-HeaderLines) -Banner 'Select what to install / apply' `
@@ -3263,7 +4116,7 @@ function Show-InteractiveMenu {
 }
 
 #===============================================================================
-# Dispatch — run installs/tweaks/debloat from $flags + $script:Selected* lists.
+# Dispatch - run installs/tweaks/debloat from $flags + $script:Selected* lists.
 # Both the CLI (flag) path and the menu path converge here (mirrors run_installations).
 #===============================================================================
 
@@ -3293,7 +4146,7 @@ function Invoke-Tweaks {
     if (-not $script:SelectedTweaks -or $script:SelectedTweaks.Count -eq 0) { return }
 
     Write-LogStep "Applying Windows tweaks"
-    Save-TweakBackup | Out-Null
+    Save-TweakBackupOnce
 
     foreach ($key in $script:SelectedTweaks) {
         $tw = $script:WindowsTweaks | Where-Object { $_.Key -eq $key } | Select-Object -First 1
@@ -3309,6 +4162,35 @@ function Invoke-Tweaks {
         } catch {
             Write-LogWarning "Tweak '$($tw.Label)' failed: $($_.Exception.Message)"
             Add-Summary "Tweak: $($tw.Label)" $false
+        }
+    }
+}
+
+#-------------------------------------------------------------------------------
+# Apply / revert the selected Explorer-UI tweaks (backs up first)
+#-------------------------------------------------------------------------------
+function Invoke-UiTweaks {
+    if (-not $script:SelectedUiTweaks -or $script:SelectedUiTweaks.Count -eq 0) {
+        # CLI path: --uitweaks with no prior selection -> open the submenu to choose
+        Show-UiTweaksSubmenu
+    }
+    if (-not $script:SelectedUiTweaks -or $script:SelectedUiTweaks.Count -eq 0) { return }
+
+    Write-LogStep "Applying Explorer / UI tweaks"
+    Save-TweakBackupOnce
+
+    # Iterate the catalog (not the hashtable) so the order stays deterministic.
+    foreach ($t in $script:UiTweaks) {
+        if (-not $script:SelectedUiTweaks.ContainsKey($t.Key)) { continue }
+        $verb = 'Tweak'; $fn = $t.Apply
+        if ($script:SelectedUiTweaks[$t.Key] -eq 'revert') { $verb = 'Revert'; $fn = $t.Revert }
+        if (-not $fn) { continue }
+        try {
+            $ok = & $fn
+            Add-Summary "${verb}: $($t.Label)" ([bool]$ok)
+        } catch {
+            Write-LogWarning "$($t.Label) failed: $($_.Exception.Message)"
+            Add-Summary "${verb}: $($t.Label)" $false
         }
     }
 }
@@ -3351,8 +4233,9 @@ function Invoke-Installations {
     # Remote tools
     foreach ($t in $script:RemoteTools) { if ($flags[$t.Flag]) { Invoke-InstallItem $t } }
 
-    # Windows tweaks / debloat
-    if ($flags.Tweaks)  { Invoke-Tweaks }
+    # Windows tweaks / Explorer-UI tweaks / debloat
+    if ($flags.Tweaks)   { Invoke-Tweaks }
+    if ($flags.UiTweaks) { Invoke-UiTweaks }
     if ($flags.Debloat) {
         if (-not $script:SelectedDebloat -or $script:SelectedDebloat.Count -eq 0) { Show-DebloatSubmenu }
         Invoke-Debloat
@@ -3390,7 +4273,7 @@ function Show-Summary {
 }
 
 #-------------------------------------------------------------------------------
-# CLI login helpers (mirrors run_cli_logins) — best-effort, interactive
+# CLI login helpers (mirrors run_cli_logins) - best-effort, interactive
 #-------------------------------------------------------------------------------
 function Invoke-CliLogins {
     Write-LogStep "CLI login helpers"
