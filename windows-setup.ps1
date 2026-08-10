@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.6.2'
-$script:SCRIPT_REVISION = '23'
+$script:SCRIPT_VERSION  = '1.6.3'
+$script:SCRIPT_REVISION = '24'
 $script:SCRIPT_DATE     = '2026-08-10'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -539,6 +539,7 @@ $script:WindowsTweaks = @(
     @{ Key='taskbar';          Label='Taskbar Tweaks';                       Apply='Set-TaskbarTweaks' }
     @{ Key='error-reporting';  Label='Activate Error Reporting';             Apply='Enable-WindowsErrorReporting' }
     @{ Key='camera';           Label='Install Camera App';                   Apply='Install-CameraApp' }
+    @{ Key='mouse-jiggler';    Label='Mouse Jiggler (keep session awake)';   Apply='Install-MouseJiggler' }
     @{ Key='storage-sense';    Label='Cleanup: Storage Sense';               Apply='Enable-StorageSense' }
     # Node.js switch tweaks - shown conditionally (ShowIf) based on current state
     @{ Key='switch-node-nvm';    Label='Node.js: switch to NVM';              Apply='Switch-NodeToNvm';    ShowIf='Test-NodeIsNonNvm' }
@@ -2549,6 +2550,35 @@ function Install-CameraApp {
     return $false
 }
 
+# Mouse Jiggler - a pure-software pointer nudger that keeps the session "active"
+# (no idle lock; chat presence stays green) WITHOUT any hardware or fake USB
+# device. Enable "Zen jiggle" inside the app to keep the visible cursor still.
+# Installed on demand from winget; removable from the Debloat sub-menu.
+$script:MOUSEJIGGLER_WINGETID = 'ArkaneSystems.MouseJiggler'
+
+function Test-MouseJigglerInstalled {
+    Test-App -Command 'MouseJiggler' -WingetId $script:MOUSEJIGGLER_WINGETID -DisplayNameLike '*Mouse Jiggler*'
+}
+
+function Install-MouseJiggler {
+    Write-LogInfo "Installing Mouse Jiggler (keeps the session awake by nudging the pointer)..."
+    if (Test-MouseJigglerInstalled) {
+        Write-LogInfo "Mouse Jiggler is already installed."
+        return $true
+    }
+    if (Test-Command 'winget') {
+        $ok = Invoke-WithRetry -Description 'Mouse Jiggler (winget)' -Action {
+            winget install --id $script:MOUSEJIGGLER_WINGETID -e --silent --accept-package-agreements --accept-source-agreements
+        }
+        if ($ok) {
+            Write-LogSuccess "Mouse Jiggler installed. Launch it, tick 'Enable jiggle' (add 'Zen jiggle' to keep the cursor still)."
+            return $true
+        }
+    }
+    Write-LogWarning ("Could not install Mouse Jiggler via winget (id: {0})." -f $script:MOUSEJIGGLER_WINGETID)
+    return $false
+}
+
 # Enable Storage Sense (policy) with periodic temp/recycle-bin cleanup.
 # Mirrors "Cleanup Period: 2Y". Uses the Group Policy key so the behaviour is
 # deterministic (this makes the Settings UI show these options as managed).
@@ -2636,6 +2666,9 @@ function Test-TweakApplied {
             }
             'camera' {
                 return [bool](Get-AppxPackage -Name 'Microsoft.WindowsCamera' -ErrorAction SilentlyContinue)
+            }
+            'mouse-jiggler' {
+                return (Test-MouseJigglerInstalled)
             }
             'storage-sense' {
                 $v = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\StorageSense' -Name 'AllowStorageSenseGlobal' -ErrorAction SilentlyContinue).AllowStorageSenseGlobal
@@ -3427,6 +3460,8 @@ $script:DebloatItems = @(
     @{ Key='rm-filezilla';  Label='FileZilla';                 Kind='DevTool'; Id='TimKosse.FileZilla.Client' }
     @{ Key='rm-gh';         Label='GitHub CLI';                Kind='DevTool'; Id='GitHub.cli' }
     @{ Key='rm-cloudflared';Label='Cloudflare Tunnel';         Kind='DevTool'; Id='Cloudflare.cloudflared' }
+    # --- Utilities this script can install (DevTool) --------------------------
+    @{ Key='rm-mousejiggler';Label='Mouse Jiggler';            Kind='DevTool'; Id='ArkaneSystems.MouseJiggler' }
     # --- Remote tools (DevTool) ----------------------------------------------
     @{ Key='rm-anydesk';    Label='AnyDesk';                   Kind='DevTool'; Id='AnyDeskSoftwareGmbH.AnyDesk' }
     @{ Key='rm-rustdesk';   Label='RustDesk';                  Kind='DevTool'; Id='RustDesk.RustDesk' }
