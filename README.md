@@ -111,6 +111,7 @@ Everything below is reachable through the interactive menu (`--menu`) or directl
 | Install Camera App | Install the Windows Camera app |
 | Mouse Jiggler | Install a software mouse-jiggler (`ArkaneSystems.MouseJiggler`) that fakes pointer activity to keep the session awake — no hardware/USB device needed |
 | Cleanup: Storage Sense | Auto-clean temp files & recycle bin |
+| RealVNC: normal cursor | Fix the RealVNC "dot" cursor on a headless / mouse-less host by enabling RealVNC Server's `AlwaysShowCursor` (shown only when RealVNC is installed) |
 | Node.js: switch to NVM | Replace a native Node.js with nvm-windows (shown only when Node is non-NVM) |
 | Node.js: switch to native | Replace nvm-windows with a native Node.js LTS (shown only when NVM is installed) |
 
@@ -164,7 +165,9 @@ Remove pre-installed Windows apps and (optionally) the dev tools/browsers this s
 <summary>What can be removed — click to expand</summary>
 
 - **Special (force-removed using the methods from the most-starred debloat tools):** **Microsoft Edge** (`EdgeUpdateDev\AllowUninstall` unblock + `setup.exe --force-uninstall`), **OneDrive** (built-in `OneDriveSetup /uninstall` + task/registry/leftover cleanup)
-- **UWP bloat:** Xbox, Get Help, Tips, Feedback Hub, Maps, Weather, News, Solitaire Collection, Groove Music, Movies & TV, People, Phone Link, Clipchamp, consumer Teams, Copilot, Quick Assist
+- **UWP bloat:** Xbox app / Game Bar / Game Speech / Xbox Live / Xbox Identity Provider, Get Help, Tips, Feedback Hub, Maps, Weather, News, Solitaire Collection, Groove Music, Movies & TV, People, Phone Link, Clipchamp, consumer Teams, Copilot, Quick Assist
+- **More modern apps:** Dev Home, Microsoft 365 / Office, Bing Search, Sticky Notes, Teams (new), To Do, Outlook for Windows, Paint, Power Automate, LinkedIn, Photos, Clock, Calculator, Sound Recorder, Camera, Mobile devices (Cross Device), Widgets Platform Runtime, Web Experience Pack
+- **Media/image codec extensions:** VP9 / HEVC / HEIF / WebP / AV1 / … (⚠️ removing these can break video/image playback)
 - **Dev tools / browsers:** Chrome, Node.js, Docker, VS Code, DBeaver, Postman, FileZilla, GitHub CLI, cloudflared
 - **Utilities:** Mouse Jiggler
 - **Remote tools:** AnyDesk, RustDesk, TeamViewer, RealVNC

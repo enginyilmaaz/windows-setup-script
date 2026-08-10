@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.6.3'
-$script:SCRIPT_REVISION = '24'
+$script:SCRIPT_VERSION  = '1.6.4'
+$script:SCRIPT_REVISION = '25'
 $script:SCRIPT_DATE     = '2026-08-10'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -541,6 +541,8 @@ $script:WindowsTweaks = @(
     @{ Key='camera';           Label='Install Camera App';                   Apply='Install-CameraApp' }
     @{ Key='mouse-jiggler';    Label='Mouse Jiggler (keep session awake)';   Apply='Install-MouseJiggler' }
     @{ Key='storage-sense';    Label='Cleanup: Storage Sense';               Apply='Enable-StorageSense' }
+    # RealVNC "dot cursor" fix - only shown when RealVNC is installed (ShowIf)
+    @{ Key='vnc-cursor';       Label='RealVNC: normal cursor (fix headless dot)'; Apply='Set-RealVncAlwaysShowCursor'; ShowIf='Test-RealVNCInstalled' }
     # Node.js switch tweaks - shown conditionally (ShowIf) based on current state
     @{ Key='switch-node-nvm';    Label='Node.js: switch to NVM';              Apply='Switch-NodeToNvm';    ShowIf='Test-NodeIsNonNvm' }
     @{ Key='switch-node-native'; Label='Node.js: switch to native (non-NVM)'; Apply='Switch-NodeToNative'; ShowIf='Test-NvmInstalled' }
@@ -2599,6 +2601,32 @@ function Enable-StorageSense {
     }
 }
 
+# RealVNC "dot cursor" fix. On a headless host (no physical mouse/monitor) Windows
+# collapses the pointer to a small dot, which is what RealVNC then streams. Setting
+# RealVNC Server's AlwaysShowCursor parameter makes it render the normal arrow
+# regardless. This is the vendor-documented fix - no virtual mouse / HID driver
+# needed. The parameter lives under HKLM\SOFTWARE\RealVNC\vncserver (service mode).
+$script:REALVNC_CFG_KEY = 'HKLM:\SOFTWARE\RealVNC\vncserver'
+
+function Set-RealVncAlwaysShowCursor {
+    Write-LogInfo "RealVNC: enabling AlwaysShowCursor (replaces the headless 'dot' with the normal cursor)..."
+    Write-LogWarning "The RealVNC service is restarted to apply this - your current VNC session may blink/drop for a second and then reconnect."
+    try {
+        if (-not (Test-Path -LiteralPath $script:REALVNC_CFG_KEY)) { New-Item -Path $script:REALVNC_CFG_KEY -Force | Out-Null }
+        New-ItemProperty -LiteralPath $script:REALVNC_CFG_KEY -Name 'AlwaysShowCursor' -Value 1 -PropertyType DWord -Force | Out-Null
+        $svc = Get-Service -Name 'rvncserver' -ErrorAction SilentlyContinue
+        if ($svc -and $svc.Status -eq 'Running') {
+            Restart-Service -Name 'rvncserver' -Force -ErrorAction SilentlyContinue
+            Write-LogInfo "  RealVNC Connect service restarted."
+        }
+        Write-LogSuccess "RealVNC will now show the normal cursor. Reconnect the viewer if the dot is still cached."
+        return $true
+    } catch {
+        Write-LogWarning "Could not set AlwaysShowCursor: $($_.Exception.Message)"
+        return $false
+    }
+}
+
 #===============================================================================
 # DETECTION - Test-TweakApplied (mirrors gnome_tweak_applied)
 # Returns $true if the tweak identified by -Key is currently applied.
@@ -2669,6 +2697,10 @@ function Test-TweakApplied {
             }
             'mouse-jiggler' {
                 return (Test-MouseJigglerInstalled)
+            }
+            'vnc-cursor' {
+                $v = (Get-ItemProperty -LiteralPath $script:REALVNC_CFG_KEY -Name 'AlwaysShowCursor' -ErrorAction SilentlyContinue).AlwaysShowCursor
+                return ($v -eq 1)
             }
             'storage-sense' {
                 $v = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\StorageSense' -Name 'AllowStorageSenseGlobal' -ErrorAction SilentlyContinue).AllowStorageSenseGlobal
@@ -3434,7 +3466,12 @@ $script:DebloatItems = @(
     @{ Key='edge';          Label='Microsoft Edge (force uninstall)'; Kind='Script'; Remove='Remove-MicrosoftEdge'; DetectFn='Test-EdgeRemoved' }
     @{ Key='onedrive';      Label='OneDrive';                  Kind='Script'; Remove='Remove-OneDrive'; DetectFn='Test-OneDriveRemoved' }
     # --- Microsoft Store / UWP bloat (Appx) -----------------------------------
-    @{ Key='xbox';          Label='Xbox apps';                 Kind='Appx'; Id='*Xbox*';                          ProvisionedToo=$true }
+    # Xbox split into granular pieces (was one broad '*Xbox*') so each is optional.
+    @{ Key='xbox-app';      Label='Xbox app';                  Kind='Appx'; Id='Microsoft.GamingApp';               ProvisionedToo=$true }
+    @{ Key='xbox-gamebar';  Label='Xbox Game Bar';             Kind='Appx'; Id='Microsoft.XboxGamingOverlay';       ProvisionedToo=$true }
+    @{ Key='xbox-speech';   Label='Game Speech Window';        Kind='Appx'; Id='Microsoft.XboxSpeechToTextOverlay'; ProvisionedToo=$true }
+    @{ Key='xbox-live';     Label='Xbox Live (TCUI)';          Kind='Appx'; Id='Microsoft.Xbox.TCUI';               ProvisionedToo=$true }
+    @{ Key='xbox-identity'; Label='Xbox Identity Provider';    Kind='Appx'; Id='Microsoft.XboxIdentityProvider';    ProvisionedToo=$true }
     @{ Key='gethelp';       Label='Get Help';                  Kind='Appx'; Id='*GetHelp*';                       ProvisionedToo=$true }
     @{ Key='tips';          Label='Tips';                      Kind='Appx'; Id='*Getstarted*';                    ProvisionedToo=$true }
     @{ Key='feedback';      Label='Feedback Hub';              Kind='Appx'; Id='*WindowsFeedbackHub*';            ProvisionedToo=$true }
@@ -3450,6 +3487,28 @@ $script:DebloatItems = @(
     @{ Key='teams';         Label='Teams (consumer)';          Kind='Appx'; Id='*MicrosoftTeams*';                ProvisionedToo=$true }
     @{ Key='copilot';       Label='Copilot';                   Kind='Appx'; Id='*Copilot*';                       ProvisionedToo=$true }
     @{ Key='quickassist';   Label='Quick Assist';              Kind='Appx'; Id='*QuickAssist*';                   ProvisionedToo=$true }
+    # --- More modern Windows apps (Appx) - exact package names ----------------
+    @{ Key='devhome';       Label='Dev Home';                  Kind='Appx'; Id='Microsoft.Windows.DevHome';         ProvisionedToo=$true }
+    @{ Key='office365';     Label='Microsoft 365 / Office (Copilot)'; Kind='Appx'; Id='Microsoft.MicrosoftOfficeHub'; ProvisionedToo=$true }
+    @{ Key='bing';          Label='Bing Search';               Kind='Appx'; Id='Microsoft.BingSearch';              ProvisionedToo=$true }
+    @{ Key='stickynotes';   Label='Sticky Notes';              Kind='Appx'; Id='Microsoft.MicrosoftStickyNotes';    ProvisionedToo=$true }
+    @{ Key='teams-new';     Label='Teams (new / work)';        Kind='Appx'; Id='MSTeams';                           ProvisionedToo=$true }
+    @{ Key='todo';          Label='Microsoft To Do';           Kind='Appx'; Id='Microsoft.Todos';                   ProvisionedToo=$true }
+    @{ Key='outlook-new';   Label='Outlook for Windows (new)'; Kind='Appx'; Id='Microsoft.OutlookForWindows';       ProvisionedToo=$true }
+    @{ Key='paint';         Label='Paint';                     Kind='Appx'; Id='Microsoft.Paint';                   ProvisionedToo=$true }
+    @{ Key='powerautomate'; Label='Power Automate (Desktop)';  Kind='Appx'; Id='Microsoft.PowerAutomateDesktop';    ProvisionedToo=$true }
+    @{ Key='linkedin';      Label='LinkedIn';                  Kind='Appx'; Id='*LinkedIn*';                        ProvisionedToo=$true }
+    @{ Key='photos';        Label='Photos';                    Kind='Appx'; Id='Microsoft.Windows.Photos';          ProvisionedToo=$true }
+    @{ Key='clock';         Label='Clock (Alarms & Clock)';    Kind='Appx'; Id='Microsoft.WindowsAlarms';           ProvisionedToo=$true }
+    @{ Key='calculator';    Label='Calculator';                Kind='Appx'; Id='Microsoft.WindowsCalculator';       ProvisionedToo=$true }
+    @{ Key='soundrecorder'; Label='Sound Recorder';            Kind='Appx'; Id='Microsoft.WindowsSoundRecorder';    ProvisionedToo=$true }
+    @{ Key='camera-app';    Label='Camera (Windows Camera app)'; Kind='Appx'; Id='Microsoft.WindowsCamera';         ProvisionedToo=$true }
+    @{ Key='mobiledevices'; Label='Mobile devices (Cross Device)'; Kind='Appx'; Id='MicrosoftWindows.CrossDevice';  ProvisionedToo=$true }
+    @{ Key='widgets-rt';    Label='Widgets Platform Runtime';  Kind='Appx'; Id='Microsoft.WidgetsPlatformRuntime';  ProvisionedToo=$true }
+    @{ Key='webexperience'; Label='Web Experience Pack (Widgets host)'; Kind='Appx'; Id='MicrosoftWindows.Client.WebExperience'; ProvisionedToo=$true }
+    # Media/image codec extensions (VP9/HEVC/HEIF/WebP/AV1/...). WARNING: removing
+    # these can break video/image playback (e.g. HEIF photos, HEVC/VP9 video).
+    @{ Key='media-ext';     Label='Media/image codec extensions (VP9/HEVC/HEIF/WebP/AV1) - breaks some playback'; Kind='Appx'; Id='*Extension*'; ProvisionedToo=$true }
     # --- Dev tools / browsers this script installs (DevTool) -------------------
     @{ Key='rm-chrome';     Label='Google Chrome';             Kind='DevTool'; Id='Google.Chrome' }
     @{ Key='rm-nodejs';     Label='Node.js (nvm-windows)';     Kind='DevTool'; Id='CoreyButler.NVMforWindows' }
