@@ -167,9 +167,9 @@ Remove pre-installed Windows apps and (optionally) the dev tools/browsers this s
 <details>
 <summary>What can be removed — click to expand</summary>
 
-- **Special (external removers, opt-in):** **OneDrive** and **Microsoft Edge** are removed by their upstream tools, downloaded at removal time from a **pinned commit** (no third-party binaries are bundled here) with the built-in native method as a fallback:
-  - OneDrive → [`that-guy-scott/remove-onedrive`](https://github.com/that-guy-scott/remove-onedrive) (run `-Force -NoReboot`)
-  - Edge → [`ShadowWhisperer/Remove-MS-Edge`](https://github.com/ShadowWhisperer/Remove-MS-Edge) (`Both.bat`, self-elevating, hash-validated downloads)
+- **Special (force-removed, self-contained — no runtime third-party downloads):**
+  - **OneDrive** → the [`that-guy-scott/remove-onedrive`](https://github.com/that-guy-scott/remove-onedrive) script is **vendored inline** and run `-Force -NoReboot` (with a native fallback). Only the 3 em dashes in its comments were changed to ASCII; the logic is the upstream script verbatim.
+  - **Microsoft Edge** → native force-uninstall: unblock via `EdgeUpdateDev\AllowUninstall`, then the system's own `setup.exe --force-uninstall`. (`ShadowWhisperer/Remove-MS-Edge` was intentionally **not** wired in — it downloads `setup.exe`/DLLs from GitHub at runtime.)
 - **UWP bloat:** Xbox app / Game Bar / Game Speech / Xbox Live / Xbox Identity Provider, Get Help, Tips, Feedback Hub, Maps, Weather, News, Solitaire Collection, Groove Music, Movies & TV, People, Phone Link, Clipchamp, consumer Teams, Copilot, Quick Assist
 - **More modern apps:** Dev Home, Microsoft 365 / Office, Bing Search, Sticky Notes, Teams (new), To Do, Outlook for Windows, Paint, Power Automate, LinkedIn, Photos, Clock, Calculator, Sound Recorder, Camera, Mobile devices (Cross Device), Widgets Platform Runtime, Web Experience Pack
 - **Media/image codec extensions:** VP9 / HEVC / HEIF / WebP / AV1 / … (⚠️ removing these can break video/image playback)
