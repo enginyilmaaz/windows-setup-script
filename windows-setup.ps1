@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.6.1'
-$script:SCRIPT_REVISION = '22'
+$script:SCRIPT_VERSION  = '1.6.2'
+$script:SCRIPT_REVISION = '23'
 $script:SCRIPT_DATE     = '2026-08-10'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -1557,11 +1557,22 @@ function Test-GlmOpencodeInstalled { Test-Command 'opencode' }
 # primary artifact; the VNC Viewer is additionally offered best-effort once the
 # server is in place. choco fallback: realvnc.
 #-------------------------------------------------------------------------------
-function Test-RealVNCInstalled { Test-App -DisplayNameLike '*VNC Server*' }
+# RealVNC rebranded "VNC Server" -> "RealVNC Connect" (registry DisplayName is now
+# e.g. "RealVNC Connect 8.4.1"), so a single '*VNC Server*' match misses current
+# installs. Match both eras by DisplayName, plus the winget id and the inbound
+# service (rvncserver) as fallbacks.
+function Test-RealVNCInstalled {
+    if (Test-App -DisplayNameLike '*RealVNC*' -WingetId 'RealVNC.VNCServer') { return $true }
+    foreach ($n in (Get-InstalledDisplayNames)) {
+        if ($n -like '*VNC Server*' -or $n -like '*VNC Connect*') { return $true }
+    }
+    if (Get-Service -Name 'rvncserver' -ErrorAction SilentlyContinue) { return $true }
+    return $false
+}
 
 function Install-RealVNC {
     return Install-App -Name 'RealVNC Connect (Server)' `
-        -Detect { Test-App -DisplayNameLike '*VNC Server*' } `
+        -Detect { Test-RealVNCInstalled } `
         -WingetId 'RealVNC.VNCServer' `
         -ChocoId 'realvnc' `
         -PostInstall {
@@ -3774,7 +3785,8 @@ function Invoke-SelectMenu {
         [scriptblock]$Summary,
         [scriptblock]$OnSelectAll,
         [scriptblock]$OnSelectNone,
-        [switch]$TriMode
+        [switch]$TriMode,
+        [switch]$SubMenu
     )
     $cursor = 0
     $numBuf = ''
@@ -3817,8 +3829,14 @@ function Invoke-SelectMenu {
             }
             [void]$lines.Add(@(@{ t = '  ---------------------------------------------------------------'; c = 'Yellow' }))
             if ($Summary) { [void]$lines.Add(@(@{ t = ('  ' + (& $Summary)); c = 'Green' })) } else { [void]$lines.Add(@(@{ t = '' })) }
-            $hint = '   UP/DN move  0-9 jump  SPACE toggle  ENTER sub-menu  a all  n none  c confirm  q quit'
-            if ($TriMode) { $hint = '   UP/DN move  0-9 jump  SPACE [ ]->[x] apply->[r] revert  a all  n none  c confirm  q quit' }
+            # In a sub-menu, both c and q/ESC return to the parent AND keep the current
+            # selection (there is no "cancel" - you are building up a larger selection).
+            if ($SubMenu) {
+                if ($TriMode) { $hint = '   UP/DN move  0-9 jump  SPACE [ ]->[x] apply->[r] revert  a all  n none  c/ESC/q back & keep' }
+                else          { $hint = '   UP/DN move  0-9 jump  SPACE toggle  a all  n none  c/ESC/q back & keep' }
+            } else {
+                $hint = '   UP/DN move  0-9 jump  SPACE toggle  ENTER sub-menu  a all  n none  c confirm  q quit'
+            }
             if ($numBuf) { $hint += "    #$numBuf" }
             [void]$lines.Add(@(@{ t = $hint; c = 'DarkGray' }))
 
@@ -3891,9 +3909,9 @@ function Show-RemoteSubmenu {
         if (& $t.Detect) { $mk = if (Test-RemoteUpdateAvailable -Key $t.Key) { 'update available' } else { 'installed' } }
         [void]$rows.Add(@{ Num = $n; Label = $t.Label; Desc = ''; Marker = $mk; Selected = [bool]$flags[$t.Flag]; IsGroup = $false; OnEnter = $null; Ref = $t })
     }
-    if ((Invoke-SelectMenu -Banner 'Remote Support Tools' -Rows $rows) -eq 'confirm') {
-        foreach ($r in $rows) { $flags[$r.Ref.Flag] = [bool]$r.Selected }
-    }
+    # Persist on any exit (c or q/ESC) so backing out of the sub-menu keeps choices.
+    [void](Invoke-SelectMenu -Banner 'Remote Support Tools' -Rows $rows -SubMenu)
+    foreach ($r in $rows) { $flags[$r.Ref.Flag] = [bool]$r.Selected }
 }
 
 function Show-AiCliSubmenu {
@@ -3904,9 +3922,8 @@ function Show-AiCliSubmenu {
         $mk = ''; if (& $t.Detect) { $mk = 'installed' }
         [void]$rows.Add(@{ Num = $n; Label = $t.Label; Desc = ''; Marker = $mk; Selected = [bool]$flags[$t.Flag]; IsGroup = $false; OnEnter = $null; Ref = $t })
     }
-    if ((Invoke-SelectMenu -Banner 'AI CLI Tools' -Rows $rows) -eq 'confirm') {
-        foreach ($r in $rows) { $flags[$r.Ref.Flag] = [bool]$r.Selected }
-    }
+    [void](Invoke-SelectMenu -Banner 'AI CLI Tools' -Rows $rows -SubMenu)
+    foreach ($r in $rows) { $flags[$r.Ref.Flag] = [bool]$r.Selected }
 }
 
 function Show-TweaksSubmenu {
@@ -3926,15 +3943,14 @@ function Show-TweaksSubmenu {
         $sel = ($script:SelectedAliases -contains $a.Key)
         [void]$rows.Add(@{ Num = $n; Label = ('CLI alias: ' + $a.Label); Desc = ''; Marker = $mk; Selected = $sel; IsGroup = $false; OnEnter = $null; Kind = 'alias'; Ref = $a })
     }
-    if ((Invoke-SelectMenu -Banner 'Windows Tweaks + CLI Aliases' -Rows $rows) -eq 'confirm') {
-        $script:SelectedTweaks  = @($rows | Where-Object { $_.Kind -eq 'tweak' -and $_.Selected } | ForEach-Object { $_.Ref.Key })
-        $script:SelectedAliases = @($rows | Where-Object { $_.Kind -eq 'alias' -and $_.Selected } | ForEach-Object { $_.Ref.Key })
-        $script:AliasesTouched = $true
-        if ($script:SelectedTweaks.Count -gt 0) { $flags.Tweaks = $true }
-        if (($script:SelectedTweaks -contains 'hostname') -and -not $script:HostnameValue) {
-            Set-MenuCursorVisible $true
-            $script:HostnameValue = Read-Host "`n  Enter the new computer hostname"
-        }
+    [void](Invoke-SelectMenu -Banner 'Windows Tweaks + CLI Aliases' -Rows $rows -SubMenu)
+    $script:SelectedTweaks  = @($rows | Where-Object { $_.Kind -eq 'tweak' -and $_.Selected } | ForEach-Object { $_.Ref.Key })
+    $script:SelectedAliases = @($rows | Where-Object { $_.Kind -eq 'alias' -and $_.Selected } | ForEach-Object { $_.Ref.Key })
+    $script:AliasesTouched = $true
+    $flags.Tweaks = ($script:SelectedTweaks.Count -gt 0)
+    if (($script:SelectedTweaks -contains 'hostname') -and -not $script:HostnameValue) {
+        Set-MenuCursorVisible $true
+        $script:HostnameValue = Read-Host "`n  Enter the new computer hostname"
     }
 }
 
@@ -3952,16 +3968,14 @@ function Show-UiTweaksSubmenu {
         [void]$rows.Add(@{ Num = $n; Label = $t.Label; Desc = ''; Marker = $mk; IsGroup = $false; OnEnter = $null;
                            Tri = $true; NoRevert = (-not $t.Revert); State = $st; Ref = $t })
     }
-    $res = Invoke-SelectMenu -Banner 'Explorer & UI Tweaks    [x] = apply    [r] = revert' -Rows $rows -TriMode
-    if ($res -eq 'confirm') {
-        $sel = @{}
-        foreach ($r in $rows) {
-            if     ([int]$r.State -eq 1) { $sel[$r.Ref.Key] = 'apply' }
-            elseif ([int]$r.State -eq 2) { $sel[$r.Ref.Key] = 'revert' }
-        }
-        $script:SelectedUiTweaks = $sel
-        if ($sel.Count -gt 0) { $flags.UiTweaks = $true }
+    [void](Invoke-SelectMenu -Banner 'Explorer & UI Tweaks    [x] = apply    [r] = revert' -Rows $rows -TriMode -SubMenu)
+    $sel = @{}
+    foreach ($r in $rows) {
+        if     ([int]$r.State -eq 1) { $sel[$r.Ref.Key] = 'apply' }
+        elseif ([int]$r.State -eq 2) { $sel[$r.Ref.Key] = 'revert' }
     }
+    $script:SelectedUiTweaks = $sel
+    $flags.UiTweaks = ($sel.Count -gt 0)
 }
 
 function Show-DebloatSubmenu {
@@ -3972,10 +3986,9 @@ function Show-DebloatSubmenu {
         $mk = ''; if (Test-BloatRemoved -Item $t) { $mk = 'removed' }
         [void]$rows.Add(@{ Num = $n; Label = $t.Label; Desc = ''; Marker = $mk; Selected = ($script:SelectedDebloat -contains $t.Key); IsGroup = $false; OnEnter = $null; Ref = $t })
     }
-    if ((Invoke-SelectMenu -Banner 'Debloat (remove pre-installed apps)' -Rows $rows) -eq 'confirm') {
-        $script:SelectedDebloat = @($rows | Where-Object { $_.Selected } | ForEach-Object { $_.Ref.Key })
-        if ($script:SelectedDebloat.Count -gt 0) { $flags.Debloat = $true }
-    }
+    [void](Invoke-SelectMenu -Banner 'Debloat (remove pre-installed apps)' -Rows $rows -SubMenu)
+    $script:SelectedDebloat = @($rows | Where-Object { $_.Selected } | ForEach-Object { $_.Ref.Key })
+    $flags.Debloat = ($script:SelectedDebloat.Count -gt 0)
 }
 
 function Show-VSCodeSubmenu {
@@ -3987,12 +4000,13 @@ function Show-VSCodeSubmenu {
         $n++
         [void]$rows.Add(@{ Num = $n; Label = ("Extension: {0}" -f $e.Label); Desc = ''; Marker = ''; Selected = ($script:SelectedVSCodeExt -contains $e.Id); IsGroup = $false; OnEnter = $null; Kind = 'ext'; Ref = $e })
     }
-    if ((Invoke-SelectMenu -Banner 'Visual Studio Code' -Rows $rows) -eq 'confirm') {
-        $script:VSCodeApplySettings = [bool]($rows | Where-Object { $_.Kind -eq 'settings' } | Select-Object -First 1).Selected
-        $script:SelectedVSCodeExt   = @($rows | Where-Object { $_.Kind -eq 'ext' -and $_.Selected } | ForEach-Object { $_.Ref.Id })
-        $installSel = [bool]($rows | Where-Object { $_.Kind -eq 'install' } | Select-Object -First 1).Selected
-        if ($installSel -or $script:SelectedVSCodeExt.Count -gt 0 -or $script:VSCodeApplySettings) { $flags.VSCode = $true }
-    }
+    [void](Invoke-SelectMenu -Banner 'Visual Studio Code' -Rows $rows -SubMenu)
+    $script:VSCodeApplySettings = [bool]($rows | Where-Object { $_.Kind -eq 'settings' } | Select-Object -First 1).Selected
+    $script:SelectedVSCodeExt   = @($rows | Where-Object { $_.Kind -eq 'ext' -and $_.Selected } | ForEach-Object { $_.Ref.Id })
+    $installSel = [bool]($rows | Where-Object { $_.Kind -eq 'install' } | Select-Object -First 1).Selected
+    # "Apply settings" alone is a modifier, not a reason to flag VS Code for install -
+    # otherwise merely opening this sub-menu (settings pre-checked) would enable it.
+    $flags.VSCode = ($installSel -or $script:SelectedVSCodeExt.Count -gt 0)
 }
 
 #-------------------------------------------------------------------------------
