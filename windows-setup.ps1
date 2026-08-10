@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.7.2'
-$script:SCRIPT_REVISION = '30'
+$script:SCRIPT_VERSION  = '1.7.3'
+$script:SCRIPT_REVISION = '31'
 $script:SCRIPT_DATE     = '2026-08-10'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -4502,23 +4502,40 @@ function Test-OneDriveRemoved {
 }
 
 #===============================================================================
-# Microsoft Edge force-uninstall (self-contained; NO third-party downloads).
-# Method from the most-starred debloat tools (Raphire/Win11Debloat + AveYo):
-# unblock via EdgeUpdateDev\AllowUninstall, then run the registered
-# UninstallString with --force-uninstall (fall back to the Application setup.exe).
-# NOTE: ShadowWhisperer/Remove-MS-Edge was intentionally NOT wired in - it
-# downloads setup.exe/DLLs from GitHub at runtime, which we were asked to avoid.
+# Microsoft Edge removal (self-contained; NO third-party downloads).
+# The removal LOGIC is ported from ShadowWhisperer/Remove-MS-Edge (Both.bat):
+# uninstall Edge + WebView, strip AppX, delete update tasks/services/folders, and
+# clean the registry + System32 stubs. Their tool ships its own setup.exe; we use
+# the SYSTEM's own setup.exe instead (after the EdgeUpdateDev\AllowUninstall
+# unblock), so nothing is downloaded. The heavy AppX registry-surgery and the
+# malformed-key fixer from the .bat are intentionally omitted (too risky to port);
+# Remove-AppxPackage covers the common case. Opt-in from the Debloat sub-menu.
 #===============================================================================
 function Remove-MicrosoftEdge {
-    Write-LogWarning "Force-removing Microsoft Edge (may affect WebView-based apps; Windows can reinstall it)."
+    Write-LogWarning "Force-removing Microsoft Edge + WebView (may break WebView2-based apps; Windows can reinstall it)."
+    $pf86 = ${env:ProgramFiles(x86)}; if (-not $pf86) { $pf86 = $env:ProgramFiles }
+
+    # Run every Installer\setup.exe found under $root with $setupArgs (best-effort).
+    $runSetup = {
+        param([string]$root, [string]$setupArgs)
+        if (-not (Test-Path $root)) { return }
+        Get-ChildItem -Path $root -Recurse -Filter 'setup.exe' -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -like '*\Installer\setup.exe' } |
+            ForEach-Object { try { Start-Process -FilePath $_.FullName -ArgumentList $setupArgs -Wait -ErrorAction SilentlyContinue } catch { } }
+    }
+
     try {
+        # 1) Unblock uninstall + stop every Edge-related process
         try {
             New-Item -Path 'HKLM:\SOFTWARE\Microsoft\EdgeUpdateDev' -Force -ErrorAction SilentlyContinue | Out-Null
             New-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\EdgeUpdateDev' -Name 'AllowUninstall' -Value '' -PropertyType String -Force -ErrorAction SilentlyContinue | Out-Null
         } catch { }
-        foreach ($proc in @('msedge', 'msedgewebview2', 'MicrosoftEdgeUpdate', 'WebViewHost')) {
+        foreach ($proc in @('msedge','msedgewebview2','MicrosoftEdgeUpdate','WebViewHost','identity_helper','elevation_service')) {
             Get-Process -Name $proc -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
         }
+
+        # 2) Uninstall Edge - registered UninstallString first, else system setup.exe
+        Write-LogInfo "Removing Edge..."
         $done = $false
         foreach ($hive in @(
                 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft Edge',
@@ -4530,24 +4547,88 @@ function Remove-MicrosoftEdge {
                 elseif ($us -match '^(\S+)\s*(.*)$')     { $exe = $matches[1]; $rest = $matches[2] }
                 if ($exe -and (Test-Path $exe)) {
                     if ($rest -notmatch '--force-uninstall') { $rest = ($rest + ' --force-uninstall').Trim() }
-                    Start-Process -FilePath $exe -ArgumentList $rest -Wait -ErrorAction SilentlyContinue
-                    $done = $true; break
+                    if ($rest -notmatch '--system-level')    { $rest = ($rest + ' --system-level').Trim() }
+                    try { Start-Process -FilePath $exe -ArgumentList $rest -Wait -ErrorAction SilentlyContinue; $done = $true } catch { }
                 }
             }
         }
-        if (-not $done) {
-            foreach ($root in @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application", "$env:ProgramFiles\Microsoft\Edge\Application")) {
-                if (Test-Path $root) {
-                    $setup = Get-ChildItem -Path $root -Recurse -Filter 'setup.exe' -ErrorAction SilentlyContinue |
-                             Where-Object { $_.FullName -like '*\Installer\setup.exe' } | Select-Object -First 1
-                    if ($setup) {
-                        Start-Process -FilePath $setup.FullName -ArgumentList '--uninstall --system-level --verbose-logging --force-uninstall' -Wait -ErrorAction SilentlyContinue
-                        $done = $true; break
-                    }
+        if (-not $done) { & $runSetup "$pf86\Microsoft\Edge\Application" '--uninstall --system-level --force-uninstall' }
+
+        # 3) Uninstall WebView (system + evergreen copy in LOCALAPPDATA)
+        Write-LogInfo "Removing WebView..."
+        & $runSetup "$pf86\Microsoft\EdgeWebView\Application"           '--uninstall --msedgewebview --system-level --force-uninstall'
+        & $runSetup "$env:LOCALAPPDATA\Microsoft\EdgeWebView\Application" '--uninstall --msedgewebview --force-uninstall'
+
+        # 4) Strip Edge AppX packages (all users + provisioned)
+        Write-LogInfo "Removing Edge AppX packages..."
+        try {
+            Get-AppxPackage -AllUsers -Name '*MicrosoftEdge*' -ErrorAction SilentlyContinue |
+                ForEach-Object { Remove-AppxPackage -Package $_.PackageFullName -AllUsers -ErrorAction SilentlyContinue }
+            Get-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue |
+                Where-Object { $_.DisplayName -like '*MicrosoftEdge*' } |
+                ForEach-Object { Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName -ErrorAction SilentlyContinue | Out-Null }
+        } catch { }
+
+        # 5) Delete leftover folders
+        foreach ($d in @("$pf86\Microsoft\Edge","$pf86\Microsoft\EdgeCore","$pf86\Microsoft\EdgeUpdate",
+                         "$pf86\Microsoft\EdgeWebView","$pf86\Microsoft\Temp","$env:ProgramData\Microsoft\EdgeUpdate")) {
+            Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue
+        }
+
+        # 6) Remove Edge update scheduled tasks
+        try {
+            Get-ScheduledTask -ErrorAction SilentlyContinue |
+                Where-Object { $_.TaskName -like '*MicrosoftEdge*' -or $_.TaskName -like '*edgeupdate*' -or $_.TaskName -like '*Edge Update*' } |
+                Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue
+        } catch { }
+
+        # 7) Remove Edge update / elevation services
+        foreach ($svc in @('edgeupdate','edgeupdatem','MicrosoftEdgeElevationService')) {
+            try {
+                $s = Get-Service -Name $svc -ErrorAction SilentlyContinue
+                if ($s) { if ($s.Status -eq 'Running') { Stop-Service -Name $svc -Force -ErrorAction SilentlyContinue }; & sc.exe delete $svc > $null 2>&1 }
+            } catch { }
+        }
+
+        # 8) takeown + delete the SystemApps / WindowsApps Edge directories
+        foreach ($globroot in @("$env:SystemRoot\SystemApps","$env:ProgramFiles\WindowsApps")) {
+            if (Test-Path $globroot) {
+                Get-ChildItem -Path $globroot -Directory -Filter 'Microsoft.MicrosoftEdge*' -ErrorAction SilentlyContinue | ForEach-Object {
+                    try {
+                        & takeown.exe /f $_.FullName /r /d y > $null 2>&1
+                        & icacls.exe $_.FullName /grant "$($env:UserName):F" /t /c > $null 2>&1
+                        Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+                    } catch { }
                 }
             }
         }
+
+        # 9) Extra registry keys (ported reg-delete list)
+        foreach ($k in @(
+                'HKLM\SOFTWARE\Classes\AppID\MicrosoftEdgeUpdate.exe',
+                'HKLM\SOFTWARE\Classes\AppID\{1FCBE96C-1697-43AF-9140-2897C7C69767}',
+                'HKLM\SOFTWARE\Microsoft\Active Setup\Installed Components\{9459C573-B17A-45AE-9F64-1857B5D58CEE}',
+                'HKLM\SOFTWARE\Microsoft\Edge','HKLM\SOFTWARE\Microsoft\EdgeUpdate','HKLM\SOFTWARE\Microsoft\MicrosoftEdge',
+                'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\MicrosoftEdgeUpdate.exe',
+                'HKLM\SOFTWARE\Microsoft\Internet Explorer\EdgeDebugActivation',
+                'HKLM\SOFTWARE\Microsoft\Internet Explorer\EdgeIntegration',
+                'HKLM\SOFTWARE\WOW6432Node\Microsoft\Edge','HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate',
+                'HKLM\SOFTWARE\WOW6432Node\Microsoft\MicrosoftEdge')) {
+            & reg.exe delete $k /f > $null 2>&1
+        }
+
+        # 10) takeown + delete the System32 MicrosoftEdge*.exe stubs
+        Get-ChildItem -Path "$env:SystemRoot\System32" -Filter 'MicrosoftEdge*.exe' -ErrorAction SilentlyContinue | ForEach-Object {
+            try {
+                & takeown.exe /f $_.FullName > $null 2>&1
+                & icacls.exe $_.FullName /grant "$($env:UserName):F" /c > $null 2>&1
+                Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+            } catch { }
+        }
+
+        # 11) Shortcuts + Run entries
         Remove-Item -LiteralPath "$env:PUBLIC\Desktop\Microsoft Edge.lnk" -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Microsoft Edge.lnk" -Force -ErrorAction SilentlyContinue
         $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
         $ri = Get-Item -Path $run -ErrorAction SilentlyContinue
         if ($ri) {
@@ -4557,8 +4638,9 @@ function Remove-MicrosoftEdge {
                 }
             }
         }
-        if ($done) { return $true }
-        Write-LogWarning "Could not locate the Edge uninstaller."
+
+        if (Test-EdgeRemoved) { Write-LogSuccess "Edge removed."; return $true }
+        Write-LogWarning "Edge uninstall ran but msedge.exe is still present (Windows may be re-protecting it); reboot and re-run if needed."
         return $false
     } catch {
         Write-LogWarning "Edge removal issue: $($_.Exception.Message)"
