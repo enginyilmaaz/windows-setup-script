@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.6.5'
-$script:SCRIPT_REVISION = '26'
+$script:SCRIPT_VERSION  = '1.6.6'
+$script:SCRIPT_REVISION = '27'
 $script:SCRIPT_DATE     = '2026-08-10'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -3477,20 +3477,21 @@ $script:DebloatItems = @(
     # these can break video/image playback (e.g. HEIF photos, HEVC/VP9 video).
     @{ Key='media-ext';     Label='Media/image codec extensions (VP9/HEVC/HEIF/WebP/AV1) - breaks some playback'; Kind='Appx'; Id='*Extension*'; ProvisionedToo=$true }
     # --- Dev tools / browsers this script installs (DevTool) -------------------
-    @{ Key='rm-chrome';     Label='Google Chrome';             Kind='DevTool'; Id='Google.Chrome' }
-    @{ Key='rm-nodejs';     Label='Node.js (nvm-windows)';     Kind='DevTool'; Id='CoreyButler.NVMforWindows' }
-    @{ Key='rm-docker';     Label='Docker Desktop';            Kind='DevTool'; Id='Docker.DockerDesktop' }
-    @{ Key='rm-vscode';     Label='Visual Studio Code';        Kind='DevTool'; Id='Microsoft.VisualStudioCode' }
-    @{ Key='rm-dbeaver';    Label='DBeaver';                   Kind='DevTool'; Id='DBeaver.DBeaver' }
-    @{ Key='rm-postman';    Label='Postman';                   Kind='DevTool'; Id='Postman.Postman' }
-    @{ Key='rm-filezilla';  Label='FileZilla';                 Kind='DevTool'; Id='TimKosse.FileZilla.Client' }
-    @{ Key='rm-gh';         Label='GitHub CLI';                Kind='DevTool'; Id='GitHub.cli' }
-    @{ Key='rm-cloudflared';Label='Cloudflare Tunnel';         Kind='DevTool'; Id='Cloudflare.cloudflared' }
+    # Detect = the app's own installed-check (robust vs. winget-list truncation).
+    @{ Key='rm-chrome';     Label='Google Chrome';             Kind='DevTool'; Id='Google.Chrome';               Detect='Test-ChromeInstalled' }
+    @{ Key='rm-nodejs';     Label='Node.js (nvm-windows)';     Kind='DevTool'; Id='CoreyButler.NVMforWindows';   Detect='Test-NvmInstalled' }
+    @{ Key='rm-docker';     Label='Docker Desktop';            Kind='DevTool'; Id='Docker.DockerDesktop';        Detect='Test-DockerInstalled' }
+    @{ Key='rm-vscode';     Label='Visual Studio Code';        Kind='DevTool'; Id='Microsoft.VisualStudioCode';  Detect='Test-VSCodeInstalled' }
+    @{ Key='rm-dbeaver';    Label='DBeaver';                   Kind='DevTool'; Id='DBeaver.DBeaver';             Detect='Test-DBeaverInstalled' }
+    @{ Key='rm-postman';    Label='Postman';                   Kind='DevTool'; Id='Postman.Postman';             Detect='Test-PostmanInstalled' }
+    @{ Key='rm-filezilla';  Label='FileZilla';                 Kind='DevTool'; Id='TimKosse.FileZilla.Client';   Detect='Test-FileZillaInstalled' }
+    @{ Key='rm-gh';         Label='GitHub CLI';                Kind='DevTool'; Id='GitHub.cli';                  Detect='Test-GhInstalled' }
+    @{ Key='rm-cloudflared';Label='Cloudflare Tunnel';         Kind='DevTool'; Id='Cloudflare.cloudflared';      Detect='Test-CloudflaredInstalled' }
     # --- Remote tools (DevTool) ----------------------------------------------
-    @{ Key='rm-anydesk';    Label='AnyDesk';                   Kind='DevTool'; Id='AnyDeskSoftwareGmbH.AnyDesk' }
-    @{ Key='rm-rustdesk';   Label='RustDesk';                  Kind='DevTool'; Id='RustDesk.RustDesk' }
-    @{ Key='rm-teamviewer'; Label='TeamViewer';                Kind='DevTool'; Id='TeamViewer.TeamViewer' }
-    @{ Key='rm-realvnc';    Label='RealVNC';                   Kind='DevTool'; Id='RealVNC.VNCServer' }
+    @{ Key='rm-anydesk';    Label='AnyDesk';                   Kind='DevTool'; Id='AnyDeskSoftwareGmbH.AnyDesk'; Detect='Test-AnyDeskInstalled' }
+    @{ Key='rm-rustdesk';   Label='RustDesk';                  Kind='DevTool'; Id='RustDesk.RustDesk';           Detect='Test-RustDeskInstalled' }
+    @{ Key='rm-teamviewer'; Label='TeamViewer';                Kind='DevTool'; Id='TeamViewer.TeamViewer';       Detect='Test-TeamViewerInstalled' }
+    @{ Key='rm-realvnc';    Label='RealVNC';                   Kind='DevTool'; Id='RealVNC.VNCServer';            Detect='Test-RealVNCInstalled' }
 )
 
 #-------------------------------------------------------------------------------
@@ -3505,7 +3506,16 @@ function Test-BloatRemoved {
                 return (-not $pkg)
             }
             'Winget'  { return (-not (Test-App -WingetId $Item.Id)) }
-            'DevTool' { return (-not (Test-App -WingetId $Item.Id)) }
+            'DevTool' {
+                # winget list truncates long Ids and lists MSI/EXE apps under their
+                # ARP product code, so a bare winget-id match reports installed apps
+                # as "removed". Prefer the app's own Test-*Installed detector, which
+                # also checks the command + the registry display name.
+                if ($Item.Detect -and (Get-Command $Item.Detect -ErrorAction SilentlyContinue)) {
+                    return (-not (& $Item.Detect))
+                }
+                return (-not (Test-App -WingetId $Item.Id))
+            }
             'Feature' {
                 $f = Get-WindowsOptionalFeature -Online -FeatureName $Item.Id -ErrorAction SilentlyContinue
                 if (-not $f) { return $true }
