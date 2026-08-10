@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.7.0'
-$script:SCRIPT_REVISION = '28'
+$script:SCRIPT_VERSION  = '1.7.1'
+$script:SCRIPT_REVISION = '29'
 $script:SCRIPT_DATE     = '2026-08-10'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -3674,11 +3674,41 @@ function Invoke-Debloat {
 }
 
 #===============================================================================
-# OneDrive removal (canonical method used by the popular debloat tools):
-# kill the client, run the built-in OneDriveSetup /uninstall, drop scheduled
-# tasks, unpin from Explorer, and delete leftover folders.
+# External debloat tools (opt-in) - OneDrive + Edge. The user selected two
+# upstream removers. We fetch the PINNED script at removal time (NO third-party
+# binaries are bundled into this file) and fall back to the built-in native
+# method if the download or run fails. Pinned to a commit SHA so the fetched
+# code is fixed and cannot change under us.
 #===============================================================================
+$script:EXT_ONEDRIVE_URL = 'https://raw.githubusercontent.com/that-guy-scott/remove-onedrive/bacd74e5e48c9ad6b088cedfe49af5025e47b928/Remove-OneDrive.ps1'
+$script:EXT_EDGE_URL     = 'https://raw.githubusercontent.com/ShadowWhisperer/Remove-MS-Edge/ee5faea4564e2777480dbb4f7657c4c260e7c3c9/Batch/Both.bat'
+
+# OneDrive: run the upstream remover (that-guy-scott/remove-onedrive) unattended
+# (-Force -NoReboot), then fall back to the native method below on any failure.
 function Remove-OneDrive {
+    Write-LogWarning "OneDrive: running the upstream remover you selected - $script:EXT_ONEDRIVE_URL"
+    try {
+        $tmp = Get-FileDownload -Url $script:EXT_ONEDRIVE_URL -OutFile (Join-Path $env:TEMP 'ext-Remove-OneDrive.ps1')
+        if ($tmp) {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $tmp -Force -NoReboot
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+            if (Test-OneDriveRemoved) { Write-LogSuccess "OneDrive removed via the upstream tool."; return $true }
+            Write-LogWarning "Upstream tool ran but OneDrive is still present; trying the native method."
+        } else {
+            Write-LogWarning "Could not download the upstream OneDrive tool; trying the native method."
+        }
+    } catch {
+        Write-LogWarning "Upstream OneDrive tool error: $($_.Exception.Message); trying the native method."
+    }
+    return (Remove-OneDriveNative)
+}
+
+#===============================================================================
+# OneDrive removal - native fallback (canonical method used by popular debloat
+# tools): kill the client, run the built-in OneDriveSetup /uninstall, drop
+# scheduled tasks, unpin from Explorer, and delete leftover folders.
+#===============================================================================
+function Remove-OneDriveNative {
     Write-LogInfo "Removing OneDrive..."
     try {
         Get-Process -Name 'OneDrive' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -3708,14 +3738,36 @@ function Test-OneDriveRemoved {
 }
 
 #===============================================================================
-# Microsoft Edge force-uninstall.
+# Microsoft Edge removal. Primary: the upstream remover you selected
+# (ShadowWhisperer/Remove-MS-Edge -> Both.bat) which self-elevates and downloads
+# its own hash-validated files. Fallback: the native force-uninstall below.
+#===============================================================================
+function Remove-MicrosoftEdge {
+    Write-LogWarning "Edge: running the upstream remover you selected - $script:EXT_EDGE_URL"
+    Write-LogWarning "Edge is protected; removal can affect WebView-based apps and Windows may reinstall it."
+    try {
+        $tmp = Get-FileDownload -Url $script:EXT_EDGE_URL -OutFile (Join-Path $env:TEMP 'ext-Remove-Edge.bat')
+        if ($tmp) {
+            & cmd.exe /c "`"$tmp`""
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+            if (Test-EdgeRemoved) { Write-LogSuccess "Edge removed via the upstream tool."; return $true }
+            Write-LogWarning "Upstream tool ran but Edge is still present; trying the native method."
+        } else {
+            Write-LogWarning "Could not download the upstream Edge tool; trying the native method."
+        }
+    } catch {
+        Write-LogWarning "Upstream Edge tool error: $($_.Exception.Message); trying the native method."
+    }
+    return (Remove-MicrosoftEdgeNative)
+}
+
+#===============================================================================
+# Microsoft Edge force-uninstall - native fallback.
 # Method from the most-starred debloat tools (Raphire/Win11Debloat + AveYo):
 # unblock via EdgeUpdateDev\AllowUninstall, then run the registered
 # UninstallString with --force-uninstall (fall back to the Application setup.exe).
-# WARNING: Edge is protected; this can affect WebView-dependent apps and Windows
-# may reinstall it. It is opt-in from the Debloat sub-menu.
 #===============================================================================
-function Remove-MicrosoftEdge {
+function Remove-MicrosoftEdgeNative {
     Write-LogWarning "Force-removing Microsoft Edge (may affect WebView-based apps; Windows can reinstall it)."
     try {
         try {
