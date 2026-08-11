@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.7.3'
-$script:SCRIPT_REVISION = '31'
+$script:SCRIPT_VERSION  = '1.7.4'
+$script:SCRIPT_REVISION = '32'
 $script:SCRIPT_DATE     = '2026-08-10'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -543,6 +543,8 @@ $script:WindowsTweaks = @(
     @{ Key='disable-updates';  Label='Disable Windows Updates';              Apply='Disable-WindowsUpdates' }
     @{ Key='error-reporting';  Label='Activate Error Reporting';             Apply='Enable-WindowsErrorReporting' }
     @{ Key='camera';           Label='Install Camera App';                   Apply='Install-CameraApp' }
+    @{ Key='install-webview2'; Label='Install: Edge WebView2 Runtime';       Apply='Install-EdgeWebView2' }
+    @{ Key='install-edge';     Label='Install: Microsoft Edge';              Apply='Install-EdgeBrowser' }
     @{ Key='storage-sense';    Label='Cleanup: Storage Sense';               Apply='Enable-StorageSense' }
     # RealVNC "dot cursor" fix - only shown when RealVNC is installed (ShowIf)
     @{ Key='vnc-cursor';       Label='RealVNC: normal cursor (fix headless dot)'; Apply='Set-RealVncAlwaysShowCursor'; ShowIf='Test-RealVNCInstalled' }
@@ -2635,6 +2637,34 @@ function Install-CameraApp {
     return $false
 }
 
+# Install the Edge WebView2 Runtime (winget). Lets you put WebView2 back if a
+# debloat pass removed it - many apps (Teams, widgets, installers) need it.
+function Install-EdgeWebView2 {
+    Write-LogInfo "Installing the Microsoft Edge WebView2 Runtime..."
+    if (Test-Command 'winget') {
+        $ok = Invoke-WithRetry -Description 'Edge WebView2 Runtime (winget)' -Action {
+            winget install --id Microsoft.EdgeWebView2Runtime -e --silent --accept-package-agreements --accept-source-agreements
+        }
+        if ($ok) { Write-LogSuccess "Edge WebView2 Runtime installed."; return $true }
+    }
+    Write-LogWarning "Could not install the WebView2 Runtime via winget."
+    return $false
+}
+
+# (Re)install the Microsoft Edge browser (winget). Counterpart to the Edge
+# debloat item, for when you want it back.
+function Install-EdgeBrowser {
+    Write-LogInfo "Installing Microsoft Edge..."
+    if (Test-Command 'winget') {
+        $ok = Invoke-WithRetry -Description 'Microsoft Edge (winget)' -Action {
+            winget install --id Microsoft.Edge -e --silent --accept-package-agreements --accept-source-agreements
+        }
+        if ($ok) { Write-LogSuccess "Microsoft Edge installed."; return $true }
+    }
+    Write-LogWarning "Could not install Microsoft Edge via winget."
+    return $false
+}
+
 # Enable Storage Sense (policy) with periodic temp/recycle-bin cleanup.
 # Mirrors "Cleanup Period: 2Y". Uses the Group Policy key so the behaviour is
 # deterministic (this makes the Settings UI show these options as managed).
@@ -2764,6 +2794,15 @@ function Test-TweakApplied {
             }
             'camera' {
                 return [bool](Get-AppxPackage -Name 'Microsoft.WindowsCamera' -ErrorAction SilentlyContinue)
+            }
+            'install-webview2' {
+                if (Test-Path "${env:ProgramFiles(x86)}\Microsoft\EdgeWebView\Application") { return $true }
+                return (Test-App -DisplayNameLike '*WebView2 Runtime*')
+            }
+            'install-edge' {
+                $p1 = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
+                $p2 = "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+                return ((Test-Path $p1) -or (Test-Path $p2))
             }
             'vnc-cursor' {
                 $v = (Get-ItemProperty -LiteralPath $script:REALVNC_CFG_KEY -Name 'AlwaysShowCursor' -ErrorAction SilentlyContinue).AlwaysShowCursor
@@ -3573,6 +3612,9 @@ $script:DebloatItems = @(
     @{ Key='mobiledevices'; Label='Mobile devices (Cross Device)'; Kind='Appx'; Id='MicrosoftWindows.CrossDevice';  ProvisionedToo=$true }
     @{ Key='widgets-rt';    Label='Widgets Platform Runtime';  Kind='Appx'; Id='Microsoft.WidgetsPlatformRuntime';  ProvisionedToo=$true }
     @{ Key='webexperience'; Label='Web Experience Pack (Widgets host)'; Kind='Appx'; Id='MicrosoftWindows.Client.WebExperience'; ProvisionedToo=$true }
+    @{ Key='snippingtool';  Label='Snipping Tool';               Kind='Appx'; Id='Microsoft.ScreenSketch';            ProvisionedToo=$true }
+    @{ Key='startexp';      Label='Start Experiences App';       Kind='Appx'; Id='Microsoft.StartExperiencesApp';     ProvisionedToo=$true }
+    @{ Key='storepurchase'; Label='Store Purchase / Experience Host'; Kind='Appx'; Id='Microsoft.StorePurchaseApp';  ProvisionedToo=$true }
     # Media/image codec extensions (VP9/HEVC/HEIF/WebP/AV1/...). WARNING: removing
     # these can break video/image playback (e.g. HEIF photos, HEVC/VP9 video).
     @{ Key='media-ext';     Label='Media/image codec extensions (VP9/HEVC/HEIF/WebP/AV1) - breaks some playback'; Kind='Appx'; Id='*Extension*'; ProvisionedToo=$true }
@@ -4504,15 +4546,17 @@ function Test-OneDriveRemoved {
 #===============================================================================
 # Microsoft Edge removal (self-contained; NO third-party downloads).
 # The removal LOGIC is ported from ShadowWhisperer/Remove-MS-Edge (Both.bat):
-# uninstall Edge + WebView, strip AppX, delete update tasks/services/folders, and
-# clean the registry + System32 stubs. Their tool ships its own setup.exe; we use
+# uninstall Edge, strip AppX, delete update tasks/services/folders, and clean the
+# registry + System32 stubs. WebView2 is deliberately KEPT (many apps need it), so
+# the WebView uninstall/folder-delete steps are skipped. Their tool ships its own
+# setup.exe; we use
 # the SYSTEM's own setup.exe instead (after the EdgeUpdateDev\AllowUninstall
 # unblock), so nothing is downloaded. The heavy AppX registry-surgery and the
 # malformed-key fixer from the .bat are intentionally omitted (too risky to port);
 # Remove-AppxPackage covers the common case. Opt-in from the Debloat sub-menu.
 #===============================================================================
 function Remove-MicrosoftEdge {
-    Write-LogWarning "Force-removing Microsoft Edge + WebView (may break WebView2-based apps; Windows can reinstall it)."
+    Write-LogWarning "Force-removing Microsoft Edge (WebView2 is deliberately KEPT; Windows can reinstall Edge)."
     $pf86 = ${env:ProgramFiles(x86)}; if (-not $pf86) { $pf86 = $env:ProgramFiles }
 
     # Run every Installer\setup.exe found under $root with $setupArgs (best-effort).
@@ -4554,10 +4598,7 @@ function Remove-MicrosoftEdge {
         }
         if (-not $done) { & $runSetup "$pf86\Microsoft\Edge\Application" '--uninstall --system-level --force-uninstall' }
 
-        # 3) Uninstall WebView (system + evergreen copy in LOCALAPPDATA)
-        Write-LogInfo "Removing WebView..."
-        & $runSetup "$pf86\Microsoft\EdgeWebView\Application"           '--uninstall --msedgewebview --system-level --force-uninstall'
-        & $runSetup "$env:LOCALAPPDATA\Microsoft\EdgeWebView\Application" '--uninstall --msedgewebview --force-uninstall'
+        # 3) WebView2 is intentionally KEPT (many apps depend on it) - not uninstalled.
 
         # 4) Strip Edge AppX packages (all users + provisioned)
         Write-LogInfo "Removing Edge AppX packages..."
@@ -4569,9 +4610,9 @@ function Remove-MicrosoftEdge {
                 ForEach-Object { Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName -ErrorAction SilentlyContinue | Out-Null }
         } catch { }
 
-        # 5) Delete leftover folders
+        # 5) Delete leftover folders (NOT EdgeWebView - WebView2 is kept)
         foreach ($d in @("$pf86\Microsoft\Edge","$pf86\Microsoft\EdgeCore","$pf86\Microsoft\EdgeUpdate",
-                         "$pf86\Microsoft\EdgeWebView","$pf86\Microsoft\Temp","$env:ProgramData\Microsoft\EdgeUpdate")) {
+                         "$pf86\Microsoft\Temp","$env:ProgramData\Microsoft\EdgeUpdate")) {
             Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue
         }
 

@@ -113,6 +113,8 @@ Everything below is reachable through the interactive menu (`--menu`) or directl
 | Disable Windows Updates | Set the `NoAutoUpdate` policy and disable the update services (⚠️ stops security patches) |
 | Activate Error Reporting | Enable Windows Error Reporting |
 | Install Camera App | Install the Windows Camera app |
+| Install: Edge WebView2 Runtime | (Re)install `Microsoft.EdgeWebView2Runtime` via winget |
+| Install: Microsoft Edge | (Re)install `Microsoft.Edge` via winget |
 | Cleanup: Storage Sense | Auto-clean temp files & recycle bin |
 | RealVNC: normal cursor | Fix the RealVNC "dot" cursor on a headless / mouse-less host by enabling RealVNC Server's `AlwaysShowCursor` (shown only when RealVNC is installed) |
 | Node.js: switch to NVM | Replace a native Node.js with nvm-windows (shown only when Node is non-NVM) |
@@ -169,9 +171,9 @@ Remove pre-installed Windows apps and (optionally) the dev tools/browsers this s
 
 - **Special (force-removed, self-contained — no runtime third-party downloads):**
   - **OneDrive** → the [`that-guy-scott/remove-onedrive`](https://github.com/that-guy-scott/remove-onedrive) script is **vendored inline** and run `-Force -NoReboot` (with a native fallback). Only the 3 em dashes in its comments were changed to ASCII; the logic is the upstream script verbatim.
-  - **Microsoft Edge** → native force-uninstall: unblock via `EdgeUpdateDev\AllowUninstall`, then the system's own `setup.exe --force-uninstall`. (`ShadowWhisperer/Remove-MS-Edge` was intentionally **not** wired in — it downloads `setup.exe`/DLLs from GitHub at runtime.)
+  - **Microsoft Edge** → the [`ShadowWhisperer/Remove-MS-Edge`](https://github.com/ShadowWhisperer/Remove-MS-Edge) removal **logic ported natively** (uninstall + AppX + update services/tasks + registry + System32 stubs), using the system's own `setup.exe` so nothing is downloaded. **WebView2 is deliberately kept** (many apps need it). To put things back, use the `Install: Microsoft Edge` / `Install: Edge WebView2 Runtime` tweaks.
 - **UWP bloat:** Xbox app / Game Bar / Game Speech / Xbox Live / Xbox Identity Provider, Get Help, Tips, Feedback Hub, Maps, Weather, News, Solitaire Collection, Groove Music, Movies & TV, People, Phone Link, Clipchamp, consumer Teams, Copilot, Quick Assist
-- **More modern apps:** Dev Home, Microsoft 365 / Office, Bing Search, Sticky Notes, Teams (new), To Do, Outlook for Windows, Paint, Power Automate, LinkedIn, Photos, Clock, Calculator, Sound Recorder, Camera, Mobile devices (Cross Device), Widgets Platform Runtime, Web Experience Pack
+- **More modern apps:** Dev Home, Microsoft 365 / Office, Bing Search, Sticky Notes, Teams (new), To Do, Outlook for Windows, Paint, Power Automate, LinkedIn, Photos, Clock, Calculator, Sound Recorder, Camera, Mobile devices (Cross Device), Widgets Platform Runtime, Web Experience Pack, Snipping Tool, Start Experiences App, Store Purchase App
 - **Media/image codec extensions:** VP9 / HEVC / HEIF / WebP / AV1 / … (⚠️ removing these can break video/image playback)
 - **Dev tools / browsers:** Chrome, Node.js, Docker, VS Code, DBeaver, Postman, FileZilla, GitHub CLI, cloudflared
 - **Remote tools:** AnyDesk, RustDesk, TeamViewer, RealVNC
