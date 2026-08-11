@@ -121,7 +121,7 @@ Everything below is reachable through the interactive menu (`--menu`) or directl
 | Disable Windows Updates | Set the `NoAutoUpdate` policy and disable the update services (⚠️ stops security patches) |
 | Activate Error Reporting | Enable Windows Error Reporting |
 | Enable System Restore | Turn on system protection for the system drive (shadow storage capped at 10GB) |
-| Install Windhawk | Install the Windhawk Windows customization / mod platform (`RamenSoftware.Windhawk`) |
+| Install Windhawk + taskbar mods | Install Windhawk (latest GitHub release, 2.0+, which ships `windhawk-cli.exe`) and the `taskbar-grouping`, `start-menu-size`, and `taskbar-volume-control` mods via the CLI (runs under the script's own elevation — no extra UAC) |
 | Install Camera App | Install the Windows Camera app |
 | Install: Edge WebView2 Runtime | (Re)install `Microsoft.EdgeWebView2Runtime` via winget |
 | Install: Microsoft Edge | (Re)install `Microsoft.Edge` via winget |

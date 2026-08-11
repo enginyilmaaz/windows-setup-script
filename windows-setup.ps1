@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.8.2'
-$script:SCRIPT_REVISION = '37'
+$script:SCRIPT_VERSION  = '1.8.3'
+$script:SCRIPT_REVISION = '38'
 $script:SCRIPT_DATE     = '2026-08-11'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -568,7 +568,7 @@ $script:WindowsTweaks = @(
     @{ Key='disable-updates';  Label='Disable Windows Updates';              Apply='Disable-WindowsUpdates' }
     @{ Key='error-reporting';  Label='Activate Error Reporting';             Apply='Enable-WindowsErrorReporting' }
     @{ Key='enable-restore';   Label='Enable System Restore';                Apply='Enable-SystemRestore' }
-    @{ Key='windhawk';         Label='Install Windhawk (Windows customizer)'; Apply='Install-Windhawk' }
+    @{ Key='windhawk';         Label='Install Windhawk + taskbar mods (2.0-alpha)'; Apply='Install-Windhawk' }
     @{ Key='camera';           Label='Install Camera App';                   Apply='Install-CameraApp' }
     @{ Key='install-webview2'; Label='Install: Edge WebView2 Runtime';       Apply='Install-EdgeWebView2' }
     @{ Key='install-edge';     Label='Install: Microsoft Edge';              Apply='Install-EdgeBrowser' }
@@ -2775,17 +2775,41 @@ function Enable-StorageSense {
     }
 }
 
-# Install Windhawk (the Windows customization / mod platform) via winget.
+# Install Windhawk + three taskbar mods. Uses the latest GitHub release (2.0+),
+# which ships windhawk-cli.exe - the winget build (1.7.x stable) has no CLI, so we
+# can't drive mods from it. The script is already elevated, so the CLI calls need
+# no extra UAC. taskbar-grouping is installed with its defaults (leave groups to
+# configure in the UI); start-menu-size and taskbar-volume-control get preset.
 function Install-Windhawk {
-    Write-LogInfo "Installing Windhawk..."
-    if (Test-Command 'winget') {
-        $ok = Invoke-WithRetry -Description 'Windhawk (winget)' -Action {
-            winget install --id RamenSoftware.Windhawk -e --silent --accept-package-agreements --accept-source-agreements
+    $cli = 'C:\Program Files\Windhawk\windhawk-cli.exe'
+    if (-not (Test-Path $cli)) {
+        Write-LogInfo "Installing Windhawk (latest release with the CLI)..."
+        try {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
+            $rel = Invoke-RestMethod 'https://api.github.com/repos/ramensoftware/windhawk/releases?per_page=1' -Headers @{ 'User-Agent' = 'windows-setup' }
+            $asset = $rel[0].assets | Where-Object { $_.name -eq 'windhawk_setup.exe' } | Select-Object -First 1
+            if (-not $asset) { throw 'setup asset not found' }
+            $f = Get-FileDownload -Url $asset.browser_download_url
+            if (-not $f) { throw 'download failed' }
+            Write-LogInfo "  Installing $($rel[0].tag_name) silently (also fetches its compiler; give it a minute)..."
+            Start-Process -FilePath $f -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/FORCECLOSEAPPLICATIONS' -Wait
+        } catch {
+            Write-LogWarning "Could not install Windhawk: $($_.Exception.Message)"
+            return $false
         }
-        if ($ok) { Write-LogSuccess "Windhawk installed."; return $true }
     }
-    Write-LogWarning "Could not install Windhawk via winget."
-    return $false
+    for ($i = 0; $i -lt 30 -and -not (Test-Path $cli); $i++) { Start-Sleep -Seconds 2 }
+    if (-not (Test-Path $cli)) { Write-LogWarning "Windhawk installed but windhawk-cli.exe not found (needs a 2.0+ release)."; return $false }
+
+    Write-LogInfo "  Installing taskbar mods (each compiles locally; please wait)..."
+    foreach ($m in 'taskbar-grouping', 'start-menu-size', 'taskbar-volume-control') {
+        & $cli mod install $m --quiet 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) { Write-LogInfo "  installed: $m" } else { Write-LogWarning "  mod install '$m' failed (exit $LASTEXITCODE)" }
+    }
+    & $cli mod settings set start-menu-size width=750 height=750 searchWidth=0 searchHeight=0 2>&1 | Out-Null
+    & $cli mod settings set taskbar-volume-control volumeIndicator=modern scrollArea=taskbar middleClickToMute=0 ctrlScrollVolumeChange=0 noAutomaticMuteToggle=0 volumeChangeStep=2 oldTaskbarOnWin11=0 2>&1 | Out-Null
+    Write-LogSuccess "Windhawk + taskbar mods installed (taskbar-grouping left at defaults)."
+    return $true
 }
 
 # Enable System Restore (system protection) on the system drive, clear any policy
