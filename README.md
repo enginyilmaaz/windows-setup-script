@@ -64,6 +64,9 @@ Everything below is reachable through the interactive menu (`--menu`) or directl
 | `--sharex` | ShareX screen capture |
 | `--firefox` | Firefox (opens the installer window) |
 | `--whatsapp` | WhatsApp (Microsoft Store) |
+| `--winrar` | WinRAR archiver |
+| `--spotify` | Spotify (Microsoft Store) |
+| `--power-manager` | Windows Auto Power Manager (latest GitHub release, silent) |
 | `--tweaks` | Windows desktop tweaks (submenu) |
 | `--debloat` | Remove pre-installed bloat (submenu) |
 | `--login` | CLI login helpers |

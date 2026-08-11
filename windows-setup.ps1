@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.8.0'
-$script:SCRIPT_REVISION = '35'
+$script:SCRIPT_VERSION  = '1.8.1'
+$script:SCRIPT_REVISION = '36'
 $script:SCRIPT_DATE     = '2026-08-11'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -58,6 +58,7 @@ $flags = @{
     VSCode     = $false; DBeaver = $false; Vlc = $false; Cloudflared = $false
     Gh         = $false; Postman = $false; FileZilla = $false; NotepadPP = $false
     ShareX     = $false; Firefox = $false; WhatsApp = $false
+    WinRAR     = $false; Spotify = $false; PowerManager = $false
     # AI CLI
     Claude     = $false; Codex = $false; Kimi = $false; Grok = $false
     Gemini     = $false; Qwen = $false; Opencode = $false
@@ -101,6 +102,11 @@ foreach ($arg in $script:RAW_ARGS) {
         'sharex'      { $flags.ShareX = $true }
         'firefox'     { $flags.Firefox = $true }
         'whatsapp'    { $flags.WhatsApp = $true }
+        'winrar'      { $flags.WinRAR = $true }
+        'spotify'     { $flags.Spotify = $true }
+        'power-manager' { $flags.PowerManager = $true }
+        'powermanager'  { $flags.PowerManager = $true }
+        'wapm'          { $flags.PowerManager = $true }
         'cloudflared' { $flags.Cloudflared = $true }
         'gh'          { $flags.Gh = $true }
         'postman'     { $flags.Postman = $true }
@@ -146,7 +152,7 @@ foreach ($arg in $script:RAW_ARGS) {
 if ($flags.All) {
     # NOTE: interactive/GUI installers (Vlc, Firefox, WhatsApp) are left OUT of --all
     # so the unattended run doesn't block on their setup windows; pick them individually.
-    foreach ($k in @('NodeJs','Python','Docker','Chrome','VSCode','DBeaver','Cloudflared','Gh','Postman','FileZilla','NotepadPP','ShareX','AiCli','Remote')) {
+    foreach ($k in @('NodeJs','Python','Docker','Chrome','VSCode','DBeaver','Cloudflared','Gh','Postman','FileZilla','NotepadPP','ShareX','WinRAR','PowerManager','AiCli','Remote')) {
         $flags[$k] = $true
     }
 }
@@ -511,6 +517,9 @@ $script:DevTools = @(
     @{ Key='sharex';      Flag='ShareX';      Label='ShareX';                 Install='Install-ShareX';      Detect='Test-ShareXInstalled' }
     @{ Key='firefox';     Flag='Firefox';     Label='Firefox (installer GUI)';Install='Install-Firefox';     Detect='Test-FirefoxInstalled' }
     @{ Key='whatsapp';    Flag='WhatsApp';    Label='WhatsApp (Store)';       Install='Install-WhatsApp';    Detect='Test-WhatsAppInstalled' }
+    @{ Key='winrar';      Flag='WinRAR';      Label='WinRAR';                 Install='Install-WinRAR';      Detect='Test-WinRARInstalled' }
+    @{ Key='spotify';     Flag='Spotify';     Label='Spotify (Store)';        Install='Install-Spotify';     Detect='Test-SpotifyInstalled' }
+    @{ Key='power-manager'; Flag='PowerManager'; Label='Windows Auto Power Manager'; Install='Install-PowerManager'; Detect='Test-PowerManagerInstalled' }
     @{ Key='cloudflared'; Flag='Cloudflared'; Label='Cloudflare Tunnel';      Install='Install-Cloudflared'; Detect='Test-CloudflaredInstalled' }
     @{ Key='gh';          Flag='Gh';          Label='GitHub CLI';             Install='Install-Gh';          Detect='Test-GhInstalled' }
     @{ Key='postman';     Flag='Postman';     Label='Postman';                Install='Install-Postman';     Detect='Test-PostmanInstalled' }
@@ -1160,6 +1169,34 @@ function Test-FirefoxInstalled { Test-App -DisplayNameLike '*Mozilla Firefox*' }
 
 function Install-WhatsApp { Install-WingetInteractive -Name 'WhatsApp' -Id '9NKSQGP7F2NH' -Source 'msstore' -Detect { Test-WhatsAppInstalled } }
 function Test-WhatsAppInstalled { [bool](Get-AppxPackage -Name '*WhatsApp*' -ErrorAction SilentlyContinue) }
+
+function Install-WinRAR {
+    return Install-App -Name 'WinRAR' `
+        -Detect { Test-App -DisplayNameLike '*WinRAR*' } `
+        -WingetId 'RARLab.WinRAR' -ChocoId 'winrar'
+}
+function Test-WinRARInstalled { Test-App -DisplayNameLike '*WinRAR*' }
+
+function Install-Spotify { Install-WingetInteractive -Name 'Spotify' -Id '9NCBCSZSJRSB' -Source 'msstore' -Detect { Test-SpotifyInstalled } }
+function Test-SpotifyInstalled { [bool](Get-AppxPackage -Name '*Spotify*' -ErrorAction SilentlyContinue) -or (Test-App -DisplayNameLike '*Spotify*') }
+
+# Windows Auto Power Manager (the user's own tool) - install the latest GitHub
+# release .exe silently. Asset is picked by extension so new releases keep working.
+function Install-PowerManager {
+    return Install-App -Name 'Windows Auto Power Manager' `
+        -Detect { Test-PowerManagerInstalled } `
+        -Direct {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
+            $rel = Invoke-RestMethod 'https://api.github.com/repos/enginyilmaaz/windows-auto-power-manager/releases/latest' -Headers @{ 'User-Agent' = 'windows-setup' }
+            $asset = $rel.assets | Where-Object { $_.name -like '*.exe' } | Select-Object -First 1
+            if (-not $asset) { throw 'no .exe asset in the latest release' }
+            $f = Get-FileDownload -Url $asset.browser_download_url
+            if (-not $f) { throw 'download failed' }
+            # Inno Setup silent switches (the installer is a *_Setup_*.exe).
+            Start-Process -FilePath $f -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-' -Wait
+        }
+}
+function Test-PowerManagerInstalled { Test-App -DisplayNameLike '*Auto Power Manager*' }
 
 #===============================================================================
 # 11. Cloudflared (Cloudflare Tunnel client)   [source: install_cloudflared]
@@ -5276,6 +5313,9 @@ function Show-InteractiveMenu {
         @{ k='sharex';                        label='ShareX';       desc='ShareX screen capture' }
         @{ k='firefox';                       label='Firefox';      desc='Firefox (opens the installer window)' }
         @{ k='whatsapp';                      label='WhatsApp';     desc='WhatsApp (Microsoft Store)' }
+        @{ k='winrar';                        label='WinRAR';       desc='WinRAR archiver' }
+        @{ k='spotify';                       label='Spotify';      desc='Spotify (Microsoft Store)' }
+        @{ k='power-manager';                 label='Power Manager';desc='Windows Auto Power Manager (latest release)' }
         @{ k='cloudflared';                   label='Cloudflared';  desc='Cloudflare Tunnel client' }
         @{ k='docker';                        label='Docker';       desc='Docker Desktop' }
         @{ k='aicli';       group='aicli';   label='AI CLI Tools'; desc='Claude, Codex, Kimi, Grok, Gemini, Qwen, GLM (Enter to expand)'; marker=(Get-GroupMarkerText $aiInst $script:AiCliTools.Count 'installed') }
