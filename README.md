@@ -55,11 +55,15 @@ Everything below is reachable through the interactive menu (`--menu`) or directl
 | `--chrome` | Google Chrome |
 | `--vscode` | Visual Studio Code (+ extensions submenu) |
 | `--dbeaver` | DBeaver Community (database tool) |
-| `--vlc` | VLC Media Player |
+| `--vlc` | VLC Media Player (opens the installer window) |
 | `--cloudflared` | Cloudflare Tunnel client |
 | `--gh` | GitHub CLI (`gh`) |
 | `--postman` | Postman |
 | `--filezilla` | FileZilla (FTP/SFTP client) |
+| `--notepad++` | Notepad++ text editor |
+| `--sharex` | ShareX screen capture |
+| `--firefox` | Firefox (opens the installer window) |
+| `--whatsapp` | WhatsApp (Microsoft Store) |
 | `--tweaks` | Windows desktop tweaks (submenu) |
 | `--debloat` | Remove pre-installed bloat (submenu) |
 | `--login` | CLI login helpers |
@@ -113,6 +117,7 @@ Everything below is reachable through the interactive menu (`--menu`) or directl
 | Disable Windows Updates | Set the `NoAutoUpdate` policy and disable the update services (⚠️ stops security patches) |
 | Activate Error Reporting | Enable Windows Error Reporting |
 | Enable System Restore | Turn on system protection for the system drive (shadow storage capped at 10GB) |
+| Install Windhawk | Install the Windhawk Windows customization / mod platform (`RamenSoftware.Windhawk`) |
 | Install Camera App | Install the Windows Camera app |
 | Install: Edge WebView2 Runtime | (Re)install `Microsoft.EdgeWebView2Runtime` via winget |
 | Install: Microsoft Edge | (Re)install `Microsoft.Edge` via winget |

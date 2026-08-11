@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.7.5'
-$script:SCRIPT_REVISION = '33'
+$script:SCRIPT_VERSION  = '1.8.0'
+$script:SCRIPT_REVISION = '35'
 $script:SCRIPT_DATE     = '2026-08-11'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -56,7 +56,8 @@ $flags = @{
     # dev tools
     NodeJs     = $false; Python = $false; Docker = $false; Chrome = $false
     VSCode     = $false; DBeaver = $false; Vlc = $false; Cloudflared = $false
-    Gh         = $false; Postman = $false; FileZilla = $false
+    Gh         = $false; Postman = $false; FileZilla = $false; NotepadPP = $false
+    ShareX     = $false; Firefox = $false; WhatsApp = $false
     # AI CLI
     Claude     = $false; Codex = $false; Kimi = $false; Grok = $false
     Gemini     = $false; Qwen = $false; Opencode = $false
@@ -94,6 +95,12 @@ foreach ($arg in $script:RAW_ARGS) {
         'vscode'      { $flags.VSCode = $true }
         'dbeaver'     { $flags.DBeaver = $true }
         'vlc'         { $flags.Vlc = $true }
+        'notepad++'   { $flags.NotepadPP = $true }
+        'notepadpp'   { $flags.NotepadPP = $true }
+        'npp'         { $flags.NotepadPP = $true }
+        'sharex'      { $flags.ShareX = $true }
+        'firefox'     { $flags.Firefox = $true }
+        'whatsapp'    { $flags.WhatsApp = $true }
         'cloudflared' { $flags.Cloudflared = $true }
         'gh'          { $flags.Gh = $true }
         'postman'     { $flags.Postman = $true }
@@ -137,7 +144,9 @@ foreach ($arg in $script:RAW_ARGS) {
 
 # If --all is set, enable all installations (groups expand in run logic)
 if ($flags.All) {
-    foreach ($k in @('NodeJs','Python','Docker','Chrome','VSCode','DBeaver','Vlc','Cloudflared','Gh','Postman','FileZilla','AiCli','Remote')) {
+    # NOTE: interactive/GUI installers (Vlc, Firefox, WhatsApp) are left OUT of --all
+    # so the unattended run doesn't block on their setup windows; pick them individually.
+    foreach ($k in @('NodeJs','Python','Docker','Chrome','VSCode','DBeaver','Cloudflared','Gh','Postman','FileZilla','NotepadPP','ShareX','AiCli','Remote')) {
         $flags[$k] = $true
     }
 }
@@ -498,6 +507,10 @@ $script:DevTools = @(
     @{ Key='vscode';      Flag='VSCode';      Label='Visual Studio Code';     Install='Install-VSCode';      Detect='Test-VSCodeInstalled'; SubMenu='vscode' }
     @{ Key='dbeaver';     Flag='DBeaver';     Label='DBeaver Community';      Install='Install-DBeaver';     Detect='Test-DBeaverInstalled' }
     @{ Key='vlc';         Flag='Vlc';         Label='VLC Media Player';       Install='Install-Vlc';         Detect='Test-VlcInstalled' }
+    @{ Key='notepad++';   Flag='NotepadPP';   Label='Notepad++';              Install='Install-NotepadPP';   Detect='Test-NotepadPPInstalled' }
+    @{ Key='sharex';      Flag='ShareX';      Label='ShareX';                 Install='Install-ShareX';      Detect='Test-ShareXInstalled' }
+    @{ Key='firefox';     Flag='Firefox';     Label='Firefox (installer GUI)';Install='Install-Firefox';     Detect='Test-FirefoxInstalled' }
+    @{ Key='whatsapp';    Flag='WhatsApp';    Label='WhatsApp (Store)';       Install='Install-WhatsApp';    Detect='Test-WhatsAppInstalled' }
     @{ Key='cloudflared'; Flag='Cloudflared'; Label='Cloudflare Tunnel';      Install='Install-Cloudflared'; Detect='Test-CloudflaredInstalled' }
     @{ Key='gh';          Flag='Gh';          Label='GitHub CLI';             Install='Install-Gh';          Detect='Test-GhInstalled' }
     @{ Key='postman';     Flag='Postman';     Label='Postman';                Install='Install-Postman';     Detect='Test-PostmanInstalled' }
@@ -543,6 +556,7 @@ $script:WindowsTweaks = @(
     @{ Key='disable-updates';  Label='Disable Windows Updates';              Apply='Disable-WindowsUpdates' }
     @{ Key='error-reporting';  Label='Activate Error Reporting';             Apply='Enable-WindowsErrorReporting' }
     @{ Key='enable-restore';   Label='Enable System Restore';                Apply='Enable-SystemRestore' }
+    @{ Key='windhawk';         Label='Install Windhawk (Windows customizer)'; Apply='Install-Windhawk' }
     @{ Key='camera';           Label='Install Camera App';                   Apply='Install-CameraApp' }
     @{ Key='install-webview2'; Label='Install: Edge WebView2 Runtime';       Apply='Install-EdgeWebView2' }
     @{ Key='install-edge';     Label='Install: Microsoft Edge';              Apply='Install-EdgeBrowser' }
@@ -1112,12 +1126,40 @@ function Test-DBeaverInstalled { Test-App -Command 'dbeaver' -DisplayNameLike '*
 #===============================================================================
 # 10. VLC Media Player   [source: install_vlc]  -- winget primary (versioned URL)
 #===============================================================================
-function Install-Vlc {
-    return Install-App -Name 'VLC Media Player' `
-        -Detect { Test-App -Command 'vlc' -DisplayNameLike '*VLC media player*' } `
-        -WingetId 'VideoLAN.VLC' -ChocoId 'vlc'
+# Interactive winget install - opens the app's own setup window and waits for it.
+# Used for apps the user wants to click through (kept out of --all).
+function Install-WingetInteractive {
+    param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Id, [string]$Source, [scriptblock]$Detect)
+    Write-LogInfo "$Name : opening the installer window - finish it there..."
+    if (-not (Test-Command 'winget')) { Write-LogWarning "winget is not available for $Name."; return $false }
+    if ($Source) { winget install --id $Id -e --source $Source --interactive --accept-source-agreements --accept-package-agreements 2>$null }
+    else         { winget install --id $Id -e --interactive --accept-source-agreements --accept-package-agreements 2>$null }
+    if (& $Detect) { Write-LogSuccess "$Name installed."; return $true }
+    Write-LogWarning "$Name install not detected (the installer may have been cancelled)."
+    return $false
 }
+function Install-Vlc { Install-WingetInteractive -Name 'VLC Media Player' -Id 'VideoLAN.VLC' -Detect { Test-VlcInstalled } }
 function Test-VlcInstalled { Test-App -Command 'vlc' -DisplayNameLike '*VLC media player*' }
+
+function Install-NotepadPP {
+    return Install-App -Name 'Notepad++' `
+        -Detect { Test-App -DisplayNameLike '*Notepad++*' } `
+        -WingetId 'Notepad++.Notepad++' -ChocoId 'notepadplusplus'
+}
+function Test-NotepadPPInstalled { Test-App -DisplayNameLike '*Notepad++*' }
+
+function Install-ShareX {
+    return Install-App -Name 'ShareX' `
+        -Detect { Test-App -DisplayNameLike '*ShareX*' } `
+        -WingetId 'ShareX.ShareX' -ChocoId 'sharex'
+}
+function Test-ShareXInstalled { Test-App -DisplayNameLike '*ShareX*' }
+
+function Install-Firefox { Install-WingetInteractive -Name 'Mozilla Firefox' -Id 'Mozilla.Firefox' -Detect { Test-FirefoxInstalled } }
+function Test-FirefoxInstalled { Test-App -DisplayNameLike '*Mozilla Firefox*' }
+
+function Install-WhatsApp { Install-WingetInteractive -Name 'WhatsApp' -Id '9NKSQGP7F2NH' -Source 'msstore' -Detect { Test-WhatsAppInstalled } }
+function Test-WhatsAppInstalled { [bool](Get-AppxPackage -Name '*WhatsApp*' -ErrorAction SilentlyContinue) }
 
 #===============================================================================
 # 11. Cloudflared (Cloudflare Tunnel client)   [source: install_cloudflared]
@@ -2686,6 +2728,19 @@ function Enable-StorageSense {
     }
 }
 
+# Install Windhawk (the Windows customization / mod platform) via winget.
+function Install-Windhawk {
+    Write-LogInfo "Installing Windhawk..."
+    if (Test-Command 'winget') {
+        $ok = Invoke-WithRetry -Description 'Windhawk (winget)' -Action {
+            winget install --id RamenSoftware.Windhawk -e --silent --accept-package-agreements --accept-source-agreements
+        }
+        if ($ok) { Write-LogSuccess "Windhawk installed."; return $true }
+    }
+    Write-LogWarning "Could not install Windhawk via winget."
+    return $false
+}
+
 # Enable System Restore (system protection) on the system drive, clear any policy
 # that disabled it, and cap the shadow storage at 10GB.
 function Enable-SystemRestore {
@@ -2847,6 +2902,9 @@ function Test-TweakApplied {
                 if ($pol -eq 1) { return $false }
                 $v = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore' -Name 'RPSessionInterval' -ErrorAction SilentlyContinue).RPSessionInterval
                 return ($v -eq 1)
+            }
+            'windhawk' {
+                return (Test-App -Command 'windhawk' -DisplayNameLike '*Windhawk*')
             }
             'camera' {
                 return [bool](Get-AppxPackage -Name 'Microsoft.WindowsCamera' -ErrorAction SilentlyContinue)
@@ -5214,6 +5272,10 @@ function Show-InteractiveMenu {
         @{ k='uitweaks';    group='uitweaks';label='Explorer & UI'; desc='This PC / nav pane / context menu / registry tweaks (Enter to expand)'; marker=(Get-GroupMarkerText $uiInst $script:UiTweaks.Count 'applied') }
         @{ k='dbeaver';                       label='DBeaver';      desc='DBeaver CE (database tool)' }
         @{ k='vlc';                           label='VLC';          desc='VLC Media Player' }
+        @{ k='notepad++';                     label='Notepad++';    desc='Notepad++ text editor' }
+        @{ k='sharex';                        label='ShareX';       desc='ShareX screen capture' }
+        @{ k='firefox';                       label='Firefox';      desc='Firefox (opens the installer window)' }
+        @{ k='whatsapp';                      label='WhatsApp';     desc='WhatsApp (Microsoft Store)' }
         @{ k='cloudflared';                   label='Cloudflared';  desc='Cloudflare Tunnel client' }
         @{ k='docker';                        label='Docker';       desc='Docker Desktop' }
         @{ k='aicli';       group='aicli';   label='AI CLI Tools'; desc='Claude, Codex, Kimi, Grok, Gemini, Qwen, GLM (Enter to expand)'; marker=(Get-GroupMarkerText $aiInst $script:AiCliTools.Count 'installed') }
