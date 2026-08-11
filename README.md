@@ -67,6 +67,7 @@ Everything below is reachable through the interactive menu (`--menu`) or directl
 | `--winrar` | WinRAR archiver |
 | `--spotify` | Spotify (Microsoft Store) |
 | `--power-manager` | Windows Auto Power Manager (latest GitHub release, silent) |
+| `--revo` | Revo Uninstaller Pro |
 | `--tweaks` | Windows desktop tweaks (submenu) |
 | `--debloat` | Remove pre-installed bloat (submenu) |
 | `--login` | CLI login helpers |

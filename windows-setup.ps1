@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.8.1'
-$script:SCRIPT_REVISION = '36'
+$script:SCRIPT_VERSION  = '1.8.2'
+$script:SCRIPT_REVISION = '37'
 $script:SCRIPT_DATE     = '2026-08-11'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -58,7 +58,7 @@ $flags = @{
     VSCode     = $false; DBeaver = $false; Vlc = $false; Cloudflared = $false
     Gh         = $false; Postman = $false; FileZilla = $false; NotepadPP = $false
     ShareX     = $false; Firefox = $false; WhatsApp = $false
-    WinRAR     = $false; Spotify = $false; PowerManager = $false
+    WinRAR     = $false; Spotify = $false; PowerManager = $false; RevoPro = $false
     # AI CLI
     Claude     = $false; Codex = $false; Kimi = $false; Grok = $false
     Gemini     = $false; Qwen = $false; Opencode = $false
@@ -107,6 +107,8 @@ foreach ($arg in $script:RAW_ARGS) {
         'power-manager' { $flags.PowerManager = $true }
         'powermanager'  { $flags.PowerManager = $true }
         'wapm'          { $flags.PowerManager = $true }
+        'revo'        { $flags.RevoPro = $true }
+        'revopro'     { $flags.RevoPro = $true }
         'cloudflared' { $flags.Cloudflared = $true }
         'gh'          { $flags.Gh = $true }
         'postman'     { $flags.Postman = $true }
@@ -152,7 +154,7 @@ foreach ($arg in $script:RAW_ARGS) {
 if ($flags.All) {
     # NOTE: interactive/GUI installers (Vlc, Firefox, WhatsApp) are left OUT of --all
     # so the unattended run doesn't block on their setup windows; pick them individually.
-    foreach ($k in @('NodeJs','Python','Docker','Chrome','VSCode','DBeaver','Cloudflared','Gh','Postman','FileZilla','NotepadPP','ShareX','WinRAR','PowerManager','AiCli','Remote')) {
+    foreach ($k in @('NodeJs','Python','Docker','Chrome','VSCode','DBeaver','Cloudflared','Gh','Postman','FileZilla','NotepadPP','ShareX','WinRAR','PowerManager','RevoPro','AiCli','Remote')) {
         $flags[$k] = $true
     }
 }
@@ -520,6 +522,7 @@ $script:DevTools = @(
     @{ Key='winrar';      Flag='WinRAR';      Label='WinRAR';                 Install='Install-WinRAR';      Detect='Test-WinRARInstalled' }
     @{ Key='spotify';     Flag='Spotify';     Label='Spotify (Store)';        Install='Install-Spotify';     Detect='Test-SpotifyInstalled' }
     @{ Key='power-manager'; Flag='PowerManager'; Label='Windows Auto Power Manager'; Install='Install-PowerManager'; Detect='Test-PowerManagerInstalled' }
+    @{ Key='revo';        Flag='RevoPro';     Label='Revo Uninstaller Pro';   Install='Install-RevoPro';     Detect='Test-RevoProInstalled' }
     @{ Key='cloudflared'; Flag='Cloudflared'; Label='Cloudflare Tunnel';      Install='Install-Cloudflared'; Detect='Test-CloudflaredInstalled' }
     @{ Key='gh';          Flag='Gh';          Label='GitHub CLI';             Install='Install-Gh';          Detect='Test-GhInstalled' }
     @{ Key='postman';     Flag='Postman';     Label='Postman';                Install='Install-Postman';     Detect='Test-PostmanInstalled' }
@@ -1197,6 +1200,13 @@ function Install-PowerManager {
         }
 }
 function Test-PowerManagerInstalled { Test-App -DisplayNameLike '*Auto Power Manager*' }
+
+function Install-RevoPro {
+    return Install-App -Name 'Revo Uninstaller Pro' `
+        -Detect { Test-App -DisplayNameLike '*Revo Uninstaller*' } `
+        -WingetId 'RevoUninstaller.RevoUninstallerPro' -ChocoId 'revouninstaller'
+}
+function Test-RevoProInstalled { Test-App -DisplayNameLike '*Revo Uninstaller*' }
 
 #===============================================================================
 # 11. Cloudflared (Cloudflare Tunnel client)   [source: install_cloudflared]
@@ -5316,6 +5326,7 @@ function Show-InteractiveMenu {
         @{ k='winrar';                        label='WinRAR';       desc='WinRAR archiver' }
         @{ k='spotify';                       label='Spotify';      desc='Spotify (Microsoft Store)' }
         @{ k='power-manager';                 label='Power Manager';desc='Windows Auto Power Manager (latest release)' }
+        @{ k='revo';                          label='Revo Pro';     desc='Revo Uninstaller Pro' }
         @{ k='cloudflared';                   label='Cloudflared';  desc='Cloudflare Tunnel client' }
         @{ k='docker';                        label='Docker';       desc='Docker Desktop' }
         @{ k='aicli';       group='aicli';   label='AI CLI Tools'; desc='Claude, Codex, Kimi, Grok, Gemini, Qwen, GLM (Enter to expand)'; marker=(Get-GroupMarkerText $aiInst $script:AiCliTools.Count 'installed') }
