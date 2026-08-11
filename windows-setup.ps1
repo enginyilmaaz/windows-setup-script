@@ -24,9 +24,9 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.7.4'
-$script:SCRIPT_REVISION = '32'
-$script:SCRIPT_DATE     = '2026-08-10'
+$script:SCRIPT_VERSION  = '1.7.5'
+$script:SCRIPT_REVISION = '33'
+$script:SCRIPT_DATE     = '2026-08-11'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
 $script:SELF_URL = 'https://bit.ly/windows-ey'
@@ -542,6 +542,7 @@ $script:WindowsTweaks = @(
     @{ Key='disable-search';   Label='Disable Windows Search (WSearch service)'; Apply='Disable-WindowsSearchService' }
     @{ Key='disable-updates';  Label='Disable Windows Updates';              Apply='Disable-WindowsUpdates' }
     @{ Key='error-reporting';  Label='Activate Error Reporting';             Apply='Enable-WindowsErrorReporting' }
+    @{ Key='enable-restore';   Label='Enable System Restore';                Apply='Enable-SystemRestore' }
     @{ Key='camera';           Label='Install Camera App';                   Apply='Install-CameraApp' }
     @{ Key='install-webview2'; Label='Install: Edge WebView2 Runtime';       Apply='Install-EdgeWebView2' }
     @{ Key='install-edge';     Label='Install: Microsoft Edge';              Apply='Install-EdgeBrowser' }
@@ -2685,6 +2686,55 @@ function Enable-StorageSense {
     }
 }
 
+# Enable System Restore (system protection) on the system drive, clear any policy
+# that disabled it, and cap the shadow storage at 10GB.
+function Enable-SystemRestore {
+    Write-LogInfo "Enabling System Restore (system protection) on $env:SystemDrive..."
+    try {
+        $pol = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\SystemRestore'
+        if (Test-Path $pol) {
+            Remove-ItemProperty -LiteralPath $pol -Name 'DisableSR'     -ErrorAction SilentlyContinue
+            Remove-ItemProperty -LiteralPath $pol -Name 'DisableConfig' -ErrorAction SilentlyContinue
+        }
+        Enable-ComputerRestore -Drive "$env:SystemDrive\" -ErrorAction Stop
+        & vssadmin.exe resize shadowstorage /for=$env:SystemDrive /on=$env:SystemDrive /maxsize=10GB > $null 2>&1
+        Write-LogSuccess "System Restore enabled on $env:SystemDrive (shadow storage capped at 10GB)."
+        return $true
+    } catch {
+        Write-LogWarning "Could not enable System Restore: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+# Disable System Restore AND delete every restore point / shadow copy (used by the
+# debloat item). Irreversible - the deleted restore points cannot be recovered.
+function Disable-SystemRestoreAndPurge {
+    Write-LogWarning "Disabling System Restore and DELETING all restore points / shadow copies (irreversible)."
+    try {
+        Disable-ComputerRestore -Drive "$env:SystemDrive\" -ErrorAction SilentlyContinue
+        & vssadmin.exe delete shadows /all /quiet > $null 2>&1
+        $pol = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\SystemRestore'
+        if (-not (Test-Path $pol)) { New-Item -Path $pol -Force | Out-Null }
+        New-ItemProperty -LiteralPath $pol -Name 'DisableSR'     -Value 1 -PropertyType DWord -Force | Out-Null
+        New-ItemProperty -LiteralPath $pol -Name 'DisableConfig' -Value 1 -PropertyType DWord -Force | Out-Null
+        Write-LogSuccess "System Restore disabled; all restore points deleted."
+        return $true
+    } catch {
+        Write-LogWarning "Could not fully disable/purge System Restore: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+# Is System Restore disabled? (drives the debloat 'removed' marker.)
+function Test-SystemRestoreDisabled {
+    try {
+        $pol = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\SystemRestore' -Name 'DisableSR' -ErrorAction SilentlyContinue).DisableSR
+        if ($pol -eq 1) { return $true }
+        $v = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore' -Name 'RPSessionInterval' -ErrorAction SilentlyContinue).RPSessionInterval
+        return ($v -ne 1)
+    } catch { return $false }
+}
+
 # RealVNC "dot cursor" fix. On a headless host (no physical mouse/monitor) Windows
 # collapses the pointer to a small dot, which is what RealVNC then streams. Setting
 # RealVNC Server's AlwaysShowCursor parameter makes it render the normal arrow
@@ -2791,6 +2841,12 @@ function Test-TweakApplied {
             'error-reporting' {
                 $v = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting' -Name 'Disabled' -ErrorAction SilentlyContinue).Disabled
                 return ($v -eq 0)
+            }
+            'enable-restore' {
+                $pol = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\SystemRestore' -Name 'DisableSR' -ErrorAction SilentlyContinue).DisableSR
+                if ($pol -eq 1) { return $false }
+                $v = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore' -Name 'RPSessionInterval' -ErrorAction SilentlyContinue).RPSessionInterval
+                return ($v -eq 1)
             }
             'camera' {
                 return [bool](Get-AppxPackage -Name 'Microsoft.WindowsCamera' -ErrorAction SilentlyContinue)
@@ -3571,6 +3627,7 @@ $script:DebloatItems = @(
     # --- Special removals (custom logic; methods taken from the most-starred debloat tools) ---
     @{ Key='edge';          Label='Microsoft Edge (force uninstall)'; Kind='Script'; Remove='Remove-MicrosoftEdge'; DetectFn='Test-EdgeRemoved' }
     @{ Key='onedrive';      Label='OneDrive';                  Kind='Script'; Remove='Remove-OneDrive'; DetectFn='Test-OneDriveRemoved' }
+    @{ Key='sysrestore';    Label='System Restore: disable + delete all restore points'; Kind='Script'; Remove='Disable-SystemRestoreAndPurge'; DetectFn='Test-SystemRestoreDisabled' }
     # --- Microsoft Store / UWP bloat (Appx) -----------------------------------
     # Xbox split into granular pieces (was one broad '*Xbox*') so each is optional.
     @{ Key='xbox-app';      Label='Xbox app';                  Kind='Appx'; Id='Microsoft.GamingApp';               ProvisionedToo=$true }
