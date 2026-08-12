@@ -153,6 +153,7 @@ Every entry is a **two-way toggle**. In the submenu, **SPACE** cycles each row `
 | Nav pane: Gallery | Hide Gallery (Windows 11) | Show Gallery |
 | Nav pane: Home | Hide Home (Windows 11) | Show Home |
 | Quick Access | Hide frequently-used folders | Show them |
+| Quick Access: Desktop | Pin the Desktop folder to Quick Access | Unpin it |
 | Win11 context menu | Restore the classic (full) right-click menu | Back to the compact Win11 menu |
 | Context menu: Share with | Remove the `Sharing` shell handlers | Re-import from backup |
 | Properties: Sharing tab | Remove the Sharing property sheet | Re-import from backup |

@@ -24,9 +24,9 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.8.3'
-$script:SCRIPT_REVISION = '38'
-$script:SCRIPT_DATE     = '2026-08-11'
+$script:SCRIPT_VERSION  = '1.8.4'
+$script:SCRIPT_REVISION = '39'
+$script:SCRIPT_DATE     = '2026-08-12'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
 $script:SELF_URL = 'https://bit.ly/windows-ey'
@@ -592,6 +592,7 @@ $script:UiTweaks = @(
     @{ Key='nav-gallery';        Label='Nav pane: remove Gallery (Win11)';             Apply='Remove-NavPaneGallery';        Revert='Restore-NavPaneGallery' }
     @{ Key='nav-home';           Label='Nav pane: remove Home (Win11)';                Apply='Remove-NavPaneHome';           Revert='Restore-NavPaneHome' }
     @{ Key='quick-access';       Label='Quick Access: hide frequent folders';          Apply='Hide-QuickAccessFrequent';     Revert='Show-QuickAccessFrequent' }
+    @{ Key='pin-desktop-qa';     Label='Quick Access: pin Desktop folder';             Apply='Add-DesktopToQuickAccess';     Revert='Remove-DesktopFromQuickAccess' }
     @{ Key='classic-context';    Label='Win11: classic (full) right-click menu';       Apply='Enable-ClassicContextMenu';    Revert='Disable-ClassicContextMenu' }
     @{ Key='ctx-share';          Label="Context menu: remove 'Share with'";            Apply='Remove-ShareContextMenu';      Revert='Restore-ShareContextMenu' }
     @{ Key='ctx-sharing-tab';    Label='Properties: remove the Sharing tab';           Apply='Remove-SharingPropertyTab';    Revert='Restore-SharingPropertyTab' }
@@ -3337,6 +3338,37 @@ function Show-QuickAccessFrequent {
     return $ok
 }
 
+# Pin/unpin the Desktop folder to/from Quick Access. Uses the canonical shell
+# verbs (pintohome / unpinfromhome) so it works regardless of UI language.
+$script:QUICK_ACCESS_NS = 'shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}'
+function Test-DesktopPinnedQA {
+    try {
+        $desk = [Environment]::GetFolderPath('Desktop')
+        $qa = (New-Object -ComObject shell.application).Namespace($script:QUICK_ACCESS_NS)
+        return ([bool](@($qa.Items() | Where-Object { $_.Path -eq $desk }).Count))
+    } catch { return $false }
+}
+function Add-DesktopToQuickAccess {
+    Write-LogInfo "Pinning the Desktop folder to Quick Access..."
+    try {
+        $desk = [Environment]::GetFolderPath('Desktop')
+        (New-Object -ComObject shell.application).Namespace((Split-Path $desk)).ParseName((Split-Path $desk -Leaf)).InvokeVerb('pintohome')
+        Write-LogSuccess "Desktop pinned to Quick Access."
+        return $true
+    } catch { Write-LogWarning "Could not pin Desktop: $($_.Exception.Message)"; return $false }
+}
+function Remove-DesktopFromQuickAccess {
+    Write-LogInfo "Unpinning the Desktop folder from Quick Access..."
+    try {
+        $desk = [Environment]::GetFolderPath('Desktop')
+        $qa = (New-Object -ComObject shell.application).Namespace($script:QUICK_ACCESS_NS)
+        $it = @($qa.Items() | Where-Object { $_.Path -eq $desk }) | Select-Object -First 1
+        if ($it) { $it.InvokeVerb('unpinfromhome') }
+        Write-LogSuccess "Desktop unpinned from Quick Access."
+        return $true
+    } catch { Write-LogWarning "Could not unpin Desktop: $($_.Exception.Message)"; return $false }
+}
+
 #-------------------------------------------------------------------------------
 # Windows 11: classic (Windows 10 style) right-click menu
 #-------------------------------------------------------------------------------
@@ -3689,6 +3721,7 @@ function Test-UiTweakApplied {
                 $v = Get-UiRegValue -RegPath $script:QUICK_ACCESS_KEY -Name 'ShowFrequent'
                 return ($null -ne $v -and [int]$v -eq 0)
             }
+            'pin-desktop-qa' { return (Test-DesktopPinnedQA) }
             'classic-context' {
                 $prov = ConvertTo-RegProviderPath "$($script:CLASSIC_CTX_KEY)\InprocServer32"
                 if (-not (Test-Path -LiteralPath $prov)) { return $false }
