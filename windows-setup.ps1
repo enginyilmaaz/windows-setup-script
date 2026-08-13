@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.8.4'
-$script:SCRIPT_REVISION = '39'
+$script:SCRIPT_VERSION  = '1.8.5'
+$script:SCRIPT_REVISION = '40'
 $script:SCRIPT_DATE     = '2026-08-12'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -566,6 +566,7 @@ $script:WindowsTweaks = @(
     @{ Key='search-icon';      Label='Taskbar Search: icon only';            Apply='Set-SearchBoxIcon' }
     @{ Key='disable-search';   Label='Disable Windows Search (WSearch service)'; Apply='Disable-WindowsSearchService' }
     @{ Key='disable-updates';  Label='Disable Windows Updates';              Apply='Disable-WindowsUpdates' }
+    @{ Key='no-auto-restart';  Label='Windows Update: never auto-restart';   Apply='Disable-WindowsUpdateAutoRestart' }
     @{ Key='error-reporting';  Label='Activate Error Reporting';             Apply='Enable-WindowsErrorReporting' }
     @{ Key='enable-restore';   Label='Enable System Restore';                Apply='Enable-SystemRestore' }
     @{ Key='windhawk';         Label='Install Windhawk + taskbar mods (2.0-alpha)'; Apply='Install-Windhawk' }
@@ -2689,6 +2690,24 @@ function Disable-WindowsUpdates {
     }
 }
 
+# Stop Windows Update from rebooting the PC on its own. Updates still install, but
+# the machine waits for a MANUAL restart instead of forcing one (the classic
+# "installed an update and rebooted overnight" behaviour). Leaves updates enabled.
+function Disable-WindowsUpdateAutoRestart {
+    Write-LogInfo "Preventing Windows Update from auto-restarting while you are signed in..."
+    try {
+        $au = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU'
+        if (-not (Test-Path -LiteralPath $au)) { New-Item -Path $au -Force | Out-Null }
+        New-ItemProperty -LiteralPath $au -Name 'NoAutoRebootWithLoggedOnUsers'   -Value 1 -PropertyType DWord -Force | Out-Null
+        New-ItemProperty -LiteralPath $au -Name 'AlwaysAutoRebootAtScheduledTime' -Value 0 -PropertyType DWord -Force | Out-Null
+        Write-LogSuccess "Windows Update will no longer auto-restart while you're signed in - it waits for a manual restart."
+        return $true
+    } catch {
+        Write-LogWarning "Could not set the no-auto-restart policy: $($_.Exception.Message)"
+        return $false
+    }
+}
+
 # Enable Windows Error Reporting (WER). Mirrors "Activate Apport".
 function Enable-WindowsErrorReporting {
     Write-LogInfo "Enabling Windows Error Reporting..."
@@ -2963,6 +2982,10 @@ function Test-TweakApplied {
             }
             'disable-updates' {
                 $v = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -Name 'NoAutoUpdate' -ErrorAction SilentlyContinue).NoAutoUpdate
+                return ($v -eq 1)
+            }
+            'no-auto-restart' {
+                $v = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -Name 'NoAutoRebootWithLoggedOnUsers' -ErrorAction SilentlyContinue).NoAutoRebootWithLoggedOnUsers
                 return ($v -eq 1)
             }
             'error-reporting' {

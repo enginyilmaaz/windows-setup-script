@@ -119,6 +119,7 @@ Everything below is reachable through the interactive menu (`--menu`) or directl
 | Taskbar Search: icon only | Show the taskbar search as a compact icon (`SearchboxTaskbarMode=1`) |
 | Disable Windows Search | Stop + disable the `WSearch` indexer service |
 | Disable Windows Updates | Set the `NoAutoUpdate` policy and disable the update services (⚠️ stops security patches) |
+| Windows Update: never auto-restart | Set `NoAutoRebootWithLoggedOnUsers` so updates still install but the PC never reboots on its own — waits for a manual restart |
 | Activate Error Reporting | Enable Windows Error Reporting |
 | Enable System Restore | Turn on system protection for the system drive (shadow storage capped at 10GB) |
 | Install Windhawk + taskbar mods | Install Windhawk (latest GitHub release, 2.0+, which ships `windhawk-cli.exe`) and the `taskbar-grouping`, `start-menu-size`, and `taskbar-volume-control` mods via the CLI (runs under the script's own elevation — no extra UAC) |
