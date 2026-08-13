@@ -24,9 +24,9 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.8.5'
-$script:SCRIPT_REVISION = '40'
-$script:SCRIPT_DATE     = '2026-08-12'
+$script:SCRIPT_VERSION  = '1.8.6'
+$script:SCRIPT_REVISION = '41'
+$script:SCRIPT_DATE     = '2026-08-14'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
 $script:SELF_URL = 'https://bit.ly/windows-ey'
@@ -3860,6 +3860,7 @@ $script:DebloatItems = @(
     # Media/image codec extensions (VP9/HEVC/HEIF/WebP/AV1/...). WARNING: removing
     # these can break video/image playback (e.g. HEIF photos, HEVC/VP9 video).
     @{ Key='media-ext';     Label='Media/image codec extensions (VP9/HEVC/HEIF/WebP/AV1) - breaks some playback'; Kind='Appx'; Id='*Extension*'; ProvisionedToo=$true }
+    @{ Key='media-features';Label='Media Features (Windows Media Player Legacy)'; Kind='Feature'; Id='WindowsMediaPlayer' }
     # --- Dev tools / browsers this script installs (DevTool) -------------------
     # Detect = the app's own installed-check (robust vs. winget-list truncation).
     @{ Key='rm-chrome';     Label='Google Chrome';             Kind='DevTool'; Id='Google.Chrome';               Detect='Test-ChromeInstalled' }

@@ -188,6 +188,7 @@ Remove pre-installed Windows apps and (optionally) the dev tools/browsers this s
 - **UWP bloat:** Xbox app / Game Bar / Game Speech / Xbox Live / Xbox Identity Provider, Get Help, Tips, Feedback Hub, Maps, Weather, News, Solitaire Collection, Groove Music, Movies & TV, People, Phone Link, Clipchamp, consumer Teams, Copilot, Quick Assist
 - **More modern apps:** Dev Home, Microsoft 365 / Office, Bing Search, Sticky Notes, Teams (new), To Do, Outlook for Windows, Paint, Power Automate, LinkedIn, Photos, Clock, Calculator, Sound Recorder, Camera, Mobile devices (Cross Device), Widgets Platform Runtime, Web Experience Pack, Snipping Tool, Start Experiences App, Store Purchase App
 - **Media/image codec extensions:** VP9 / HEVC / HEIF / WebP / AV1 / … (⚠️ removing these can break video/image playback)
+- **Media Features:** disable the `WindowsMediaPlayer` optional feature (Windows Media Player Legacy)
 - **Dev tools / browsers:** Chrome, Node.js, Docker, VS Code, DBeaver, Postman, FileZilla, GitHub CLI, cloudflared
 - **Remote tools:** AnyDesk, RustDesk, TeamViewer, RealVNC
 
