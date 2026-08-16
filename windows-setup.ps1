@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.8.6'
-$script:SCRIPT_REVISION = '41'
+$script:SCRIPT_VERSION  = '1.8.7'
+$script:SCRIPT_REVISION = '42'
 $script:SCRIPT_DATE     = '2026-08-14'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -1360,18 +1360,18 @@ function Set-OpencodeGlmConfig {
         "apiKey": "{env:ZAI_API_KEY}"
       },
       "models": {
-        "glm-5.2": { "name": "GLM-5.2" },
+        "glm-5.3": { "name": "GLM-5.3" },
         "glm-5-turbo": { "name": "GLM-5-Turbo" }
       }
     }
   },
-  "model": "zai/glm-5.2"
+  "model": "zai/glm-5.3"
 }
 '@
 
     if (-not (Test-Path -LiteralPath $ocCfg)) {
         [System.IO.File]::WriteAllText($ocCfg, $exactJson)
-        Write-LogSuccess "OpenCode configured: default model = z.ai GLM-5.2"
+        Write-LogSuccess "OpenCode configured: default model = z.ai GLM-5.3"
         return
     }
 
@@ -1392,7 +1392,7 @@ function Set-OpencodeGlmConfig {
                 apiKey  = '{env:ZAI_API_KEY}'
             }
             models  = [pscustomobject]@{
-                'glm-5.2'     = [pscustomobject]@{ name = 'GLM-5.2' }
+                'glm-5.3'     = [pscustomobject]@{ name = 'GLM-5.3' }
                 'glm-5-turbo' = [pscustomobject]@{ name = 'GLM-5-Turbo' }
             }
         }
@@ -1401,14 +1401,14 @@ function Set-OpencodeGlmConfig {
         }
         $cfg.provider | Add-Member -NotePropertyName 'zai' -NotePropertyValue $zai -Force
         if ((-not $cfg.PSObject.Properties['model']) -or [string]::IsNullOrEmpty([string]$cfg.model)) {
-            $cfg | Add-Member -NotePropertyName 'model' -NotePropertyValue 'zai/glm-5.2' -Force
+            $cfg | Add-Member -NotePropertyName 'model' -NotePropertyValue 'zai/glm-5.3' -Force
         }
         $json = $cfg | ConvertTo-Json -Depth 20
         [System.IO.File]::WriteAllText($ocCfg, $json)
         Write-LogSuccess "OpenCode configured: added z.ai GLM provider (existing keys preserved)"
     } catch {
         Write-LogWarning "Existing opencode.json found - not overwriting it ($($_.Exception.Message))."
-        Write-LogInfo "  To default to GLM-5.2, add a 'zai' provider: https://docs.z.ai/scenario-example/develop-tools/opencode"
+        Write-LogInfo "  To default to GLM-5.3, add a 'zai' provider: https://docs.z.ai/scenario-example/develop-tools/opencode"
     }
 }
 
@@ -1591,13 +1591,13 @@ function Install-Qwen {
 function Test-QwenInstalled { Test-Command 'qwen' }
 
 #===============================================================================
-# GLM With OpenCode (z.ai GLM-5.2)
+# GLM With OpenCode (z.ai GLM-5.3)
 #   Installs OpenCode (npm opencode-ai preferred, official installer fallback) and
-#   preconfigures z.ai GLM-5.2 as the default model. No -Detect so the config step
+#   preconfigures z.ai GLM-5.3 as the default model. No -Detect so the config step
 #   always runs (even when OpenCode is already installed), mirroring the source.
 #===============================================================================
 function Install-GlmOpencode {
-    return Install-App -Name 'GLM With OpenCode (z.ai GLM-5.2)' `
+    return Install-App -Name 'GLM With OpenCode (z.ai GLM-5.3)' `
         -Direct {
             if (-not (Test-Command 'npm')) { Install-NodeJs }
 
@@ -1620,7 +1620,7 @@ function Install-GlmOpencode {
 
             if (-not (Test-Command 'opencode')) { throw 'OpenCode install failed (npm and installer)' }
 
-            # 2) Preconfigure z.ai GLM-5.2 as the default model (no API key stored here).
+            # 2) Preconfigure z.ai GLM-5.3 as the default model (no API key stored here).
             Set-OpencodeGlmConfig
             $global:LASTEXITCODE = 0
         } `
@@ -1629,7 +1629,7 @@ function Install-GlmOpencode {
             Write-LogInfo "  Set your z.ai key (GLM Coding Plan) to start:"
             Write-LogInfo "    `$env:ZAI_API_KEY=<your-key>   (set a User env var to persist)"
             Write-LogInfo "  Subscribe + get API key: https://z.ai/subscribe"
-            Write-LogInfo "  Then run: opencode   (defaults to GLM-5.2; use /models to switch)"
+            Write-LogInfo "  Then run: opencode   (defaults to GLM-5.3; use /models to switch)"
             Write-LogInfo "  Note: general (non-Coding-Plan) keys use baseURL .../api/paas/v4"
         }
 }
@@ -2269,12 +2269,12 @@ echo cckimi: key saved to %TOKENFILE% (current-user only).
 :run
 set "ANTHROPIC_BASE_URL=https://api.kimi.com/coding/"
 set "ANTHROPIC_AUTH_TOKEN=%token%"
-set "ANTHROPIC_MODEL=kimi-k3[1m]"
-set "ANTHROPIC_DEFAULT_OPUS_MODEL=kimi-k3[1m]"
+set "ANTHROPIC_MODEL=kimi-k3"
+set "ANTHROPIC_DEFAULT_OPUS_MODEL=kimi-k3"
 set "ANTHROPIC_DEFAULT_SONNET_MODEL=kimi-k2.7-code"
 set "ANTHROPIC_DEFAULT_HAIKU_MODEL=kimi-k2.7-code"
 set "ANTHROPIC_DEFAULT_FABLE_MODEL=kimi-k2.7-code-highspeed"
-set "CLAUDE_CODE_SUBAGENT_MODEL=kimi-k3[1m]"
+set "CLAUDE_CODE_SUBAGENT_MODEL=kimi-k3"
 set "ENABLE_TOOL_SEARCH=false"
 set "CLAUDE_CODE_AUTO_COMPACT_WINDOW=1048576"
 set "CLAUDE_CODE_EFFORT_LEVEL=max"
@@ -2298,12 +2298,12 @@ echo ccglm: key saved to %TOKENFILE% (current-user only).
 :run
 set "ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic"
 set "ANTHROPIC_AUTH_TOKEN=%token%"
-set "ANTHROPIC_MODEL=glm-5.2[1m]"
-set "ANTHROPIC_DEFAULT_OPUS_MODEL=glm-5.2[1m]"
+set "ANTHROPIC_MODEL=glm-5.3"
+set "ANTHROPIC_DEFAULT_OPUS_MODEL=glm-5.3"
 set "ANTHROPIC_DEFAULT_SONNET_MODEL=glm-4.6"
 set "ANTHROPIC_DEFAULT_HAIKU_MODEL=glm-4.5-air"
 set "ANTHROPIC_DEFAULT_FABLE_MODEL=glm-4.7-flashx"
-set "CLAUDE_CODE_SUBAGENT_MODEL=glm-5.2[1m]"
+set "CLAUDE_CODE_SUBAGENT_MODEL=glm-5.3"
 set "CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000"
 set "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
 set "API_TIMEOUT_MS=3000000"
