@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.8.7'
-$script:SCRIPT_REVISION = '42'
+$script:SCRIPT_VERSION  = '1.9.0'
+$script:SCRIPT_REVISION = '43'
 $script:SCRIPT_DATE     = '2026-08-14'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -67,7 +67,7 @@ $flags = @{
     Vnc        = $false; AnyDesk = $false; RustDesk = $false; TeamViewer = $false
     Remote     = $false
     # windows-native groups (were GNOME tweaks / debloat)
-    Tweaks     = $false; Debloat = $false; UiTweaks = $false
+    Tweaks     = $false; Debloat = $false; UiTweaks = $false; Services = $false
     # helpers / special commands
     Login      = $false; SkipUpdate = $false
     ShowBackup = $false; Restore = $false
@@ -139,6 +139,8 @@ foreach ($arg in $script:RAW_ARGS) {
         'explorer'    { $flags.UiTweaks = $true }
         'regtweaks'   { $flags.UiTweaks = $true }
         'reg-tweaks'  { $flags.UiTweaks = $true }
+        'services'    { $flags.Services = $true }
+        'svc'         { $flags.Services = $true }
         # helpers / special
         'login'       { $flags.Login = $true }
         'skip-update' { $flags.SkipUpdate = $true }
@@ -485,6 +487,7 @@ WINDOWS TWEAKS / DEBLOAT:
                     (aliases: --ui, --explorer, --reg-tweaks; each entry can be
                      applied [x] or reverted [r] from the submenu)
   --debloat         Remove pre-installed Windows bloat (submenu)
+  --services        Disable / re-enable safe Windows services (submenu; alias --svc)
 
 HELPERS:
   --login           CLI login helpers
@@ -607,6 +610,99 @@ $script:UiTweaks = @(
     @{ Key='icon-cache';         Label='Rebuild the icon cache (one-shot)';            Apply='Reset-IconCache';              Revert=$null }
     @{ Key='dns-flush';          Label='Flush DNS + renew the IP lease (one-shot)';    Apply='Clear-DnsCache';               Revert=$null }
 )
+
+# Services (own submenu group, tri-state): [x] = disable, [r] = re-enable to the
+# service's normal start type. ONLY services where turning it off just stops THAT
+# feature - never core networking / audio / notifications / time / MS-account /
+# connected-devices. Default = the start type to restore on re-enable. Services
+# missing on a given PC are skipped. Nothing here is auto-selected by "a" (all).
+$script:ServiceItems = @(
+    # --- Telemetry / diagnostics / demo (safe for everyone) -------------------
+    @{ Key='diagtrack';   Label='Telemetry: Connected User Experiences (DiagTrack)'; Svc='DiagTrack';        Default='Automatic' }
+    @{ Key='dmwap';       Label='Telemetry: WAP Push routing (dmwappushservice)';    Svc='dmwappushservice'; Default='Manual' }
+    @{ Key='retaildemo';  Label='Retail Demo';                                       Svc='RetailDemo';       Default='Manual' }
+    @{ Key='wer';         Label='Windows Error Reporting';                           Svc='WerSvc';           Default='Manual' }
+    @{ Key='wisvc';       Label='Windows Insider Service';                           Svc='wisvc';            Default='Manual' }
+    @{ Key='dps';         Label='Diagnostic Policy Service (troubleshooters)';       Svc='DPS';              Default='Automatic' }
+    # --- Security / legacy / rarely used --------------------------------------
+    @{ Key='remotereg';   Label='Remote Registry (security)';                        Svc='RemoteRegistry';   Default='Manual' }
+    @{ Key='rpclocator';  Label='RPC Locator (legacy)';                              Svc='RpcLocator';       Default='Manual' }
+    @{ Key='seclogon';    Label='Secondary Logon (Run as different user)';           Svc='seclogon';         Default='Manual' }
+    @{ Key='lltdsvc';     Label='Link-Layer Topology Discovery (network map)';       Svc='lltdsvc';          Default='Manual' }
+    @{ Key='iscsi';       Label='Microsoft iSCSI Initiator';                         Svc='MSiSCSI';          Default='Manual' }
+    @{ Key='webclient';   Label='WebClient (WebDAV) - some apps use it';             Svc='WebClient';        Default='Manual' }
+    @{ Key='eventcoll';   Label='Windows Event Collector';                           Svc='Wecsvc';           Default='Manual' }
+    @{ Key='branchcache'; Label='BranchCache';                                       Svc='PeerDistSvc';      Default='Manual' }
+    @{ Key='offlinefiles';Label='Offline Files';                                     Svc='CscService';       Default='Manual' }
+    @{ Key='workfolders'; Label='Work Folders (enterprise sync)';                    Svc='workfolderssvc';   Default='Manual' }
+    @{ Key='entapp';      Label='Enterprise App Management';                         Svc='EntAppSvc';        Default='Manual' }
+    @{ Key='wcncsvc';     Label='Windows Connect Now (legacy Wi-Fi setup)';          Svc='wcncsvc';          Default='Manual' }
+    @{ Key='wifidirect';  Label='Wi-Fi Direct Services';                             Svc='WFDSConMgrSvc';    Default='Manual' }
+    @{ Key='sstp';        Label='SSTP VPN (only if you use SSTP VPN)';               Svc='SstpSvc';          Default='Manual' }
+    @{ Key='telephony';   Label='Telephony (modem / dial-up)';                       Svc='TapiSrv';          Default='Manual' }
+    @{ Key='qwave';       Label='QWAVE (audio/video QoS)';                           Svc='QWAVE';            Default='Manual' }
+    @{ Key='dltracking';  Label='Distributed Link Tracking Client';                  Svc='TrkWks';           Default='Automatic' }
+    @{ Key='celltime';    Label='Cellular Time';                                     Svc='autotimesvc';      Default='Manual' }
+    @{ Key='smsrouter';   Label='SMS Router (cellular messaging)';                   Svc='SmsRouter';        Default='Manual' }
+    # --- Xbox / gaming (safe if you do not game) ------------------------------
+    @{ Key='xbl-auth';    Label='Xbox Live Auth Manager';                            Svc='XblAuthManager';   Default='Manual' }
+    @{ Key='xbl-save';    Label='Xbox Live Game Save';                               Svc='XblGameSave';      Default='Manual' }
+    @{ Key='xbl-net';     Label='Xbox Live Networking';                              Svc='XboxNetApiSvc';    Default='Manual' }
+    @{ Key='xbox-gip';    Label='Xbox Accessory Management';                         Svc='XboxGipSvc';       Default='Manual' }
+    # --- Print / scan / fax (safe if you have no printer/scanner/fax) ---------
+    @{ Key='spooler';     Label='Print Spooler (disables ALL printing)';             Svc='Spooler';          Default='Automatic' }
+    @{ Key='printnotify'; Label='Printer Extensions and Notifications';              Svc='PrintNotify';      Default='Manual' }
+    @{ Key='wia';         Label='Windows Image Acquisition (scanners/cameras)';      Svc='StiSvc';           Default='Manual' }
+    @{ Key='fax';         Label='Fax';                                               Svc='Fax';              Default='Manual' }
+    # --- Sensors / biometric / location / payments (safe if unused) -----------
+    @{ Key='geo';         Label='Geolocation (location services)';                   Svc='lfsvc';            Default='Manual' }
+    @{ Key='sensorsvc';   Label='Sensor Service';                                    Svc='SensorService';    Default='Manual' }
+    @{ Key='sensrmon';    Label='Sensor Monitoring';                                 Svc='SensrSvc';         Default='Manual' }
+    @{ Key='sensordata';  Label='Sensor Data Service';                               Svc='SensorDataService';Default='Manual' }
+    @{ Key='biometric';   Label='Windows Biometric (fingerprint / Hello Face)';      Svc='WbioSrvc';         Default='Manual' }
+    @{ Key='phone';       Label='Phone Service';                                     Svc='PhoneSvc';         Default='Manual' }
+    @{ Key='nfcpay';      Label='Payments and NFC/SE Manager';                       Svc='SEMgrSvc';         Default='Manual' }
+    @{ Key='wallet';      Label='Wallet Service';                                    Svc='WalletService';    Default='Manual' }
+    @{ Key='smartcard';   Label='Smart Card';                                        Svc='SCardSvr';         Default='Manual' }
+    @{ Key='scdeviceenum';Label='Smart Card Device Enumeration';                     Svc='ScDeviceEnum';     Default='Manual' }
+    @{ Key='scpolicy';    Label='Smart Card Removal Policy';                         Svc='SCPolicySvc';      Default='Manual' }
+    @{ Key='parental';    Label='Parental Controls';                                 Svc='WpcMonSvc';        Default='Manual' }
+    @{ Key='wmpnet';      Label='Windows Media Player Network Sharing';              Svc='WMPNetworkSvc';    Default='Manual' }
+    @{ Key='ics';         Label='Internet Connection Sharing (ICS)';                 Svc='SharedAccess';     Default='Manual' }
+)
+
+# Generic disable/enable for a service item (used by the Services submenu).
+function Test-ServiceDisabled {
+    param([Parameter(Mandatory)][hashtable]$Item)
+    try {
+        $s = Get-Service -Name $Item.Svc -ErrorAction SilentlyContinue
+        return ($null -ne $s -and $s.StartType -eq 'Disabled')
+    } catch { return $false }
+}
+function Disable-ServiceItem {
+    param([Parameter(Mandatory)][hashtable]$Item)
+    Write-LogInfo "Disabling: $($Item.Label) [$($Item.Svc)]"
+    try {
+        $s = Get-Service -Name $Item.Svc -ErrorAction SilentlyContinue
+        if (-not $s) { Write-LogInfo "  '$($Item.Svc)' is not present on this system - skipped."; return $true }
+        if ($s.Status -eq 'Running') { Stop-Service -Name $Item.Svc -Force -ErrorAction SilentlyContinue }
+        Set-Service -Name $Item.Svc -StartupType Disabled -ErrorAction Stop
+        Write-LogSuccess "Disabled: $($Item.Svc)"
+        return $true
+    } catch { Write-LogWarning "Could not disable $($Item.Svc): $($_.Exception.Message)"; return $false }
+}
+function Enable-ServiceItem {
+    param([Parameter(Mandatory)][hashtable]$Item)
+    $def = if ($Item.Default) { $Item.Default } else { 'Manual' }
+    Write-LogInfo "Re-enabling: $($Item.Label) [$($Item.Svc)] -> $def"
+    try {
+        $s = Get-Service -Name $Item.Svc -ErrorAction SilentlyContinue
+        if (-not $s) { Write-LogInfo "  '$($Item.Svc)' is not present on this system - skipped."; return $true }
+        Set-Service -Name $Item.Svc -StartupType $def -ErrorAction Stop
+        Write-LogSuccess "Re-enabled: $($Item.Svc) ($def)"
+        return $true
+    } catch { Write-LogWarning "Could not re-enable $($Item.Svc): $($_.Exception.Message)"; return $false }
+}
 
 # CLI aliases (own submenu group). cckimi/ccglm auto-bundle their *-token setter.
 $script:CliAliases = @(
@@ -4956,6 +5052,7 @@ $script:SelectedVSCodeExt   = @()
 # Explorer/UI tweaks are two-way, so the selection carries a direction:
 # key -> 'apply' | 'revert'.
 $script:SelectedUiTweaks    = @{}
+$script:SelectedServices    = @{}
 $script:SelectedAliases     = @()
 $script:AliasesTouched      = $false
 $script:VSCodeApplySettings = $true
@@ -5338,6 +5435,30 @@ function Show-UiTweaksSubmenu {
     $flags.UiTweaks = ($sel.Count -gt 0)
 }
 
+# Services - tri-state: [x] = disable, [r] = re-enable (to the default start type).
+function Show-ServicesSubmenu {
+    $rows = New-Object System.Collections.ArrayList
+    $n = 0
+    foreach ($t in $script:ServiceItems) {
+        $n++
+        $mk = ''; if (Test-ServiceDisabled -Item $t) { $mk = 'disabled' }
+        $st = 0
+        if ($script:SelectedServices.ContainsKey($t.Key)) {
+            if ($script:SelectedServices[$t.Key] -eq 'enable') { $st = 2 } else { $st = 1 }
+        }
+        [void]$rows.Add(@{ Num = $n; Label = $t.Label; Desc = ''; Marker = $mk; IsGroup = $false; OnEnter = $null;
+                           Tri = $true; NoRevert = $false; State = $st; Ref = $t })
+    }
+    [void](Invoke-SelectMenu -Banner 'Services    [x] = disable    [r] = re-enable' -Rows $rows -TriMode -SubMenu)
+    $sel = @{}
+    foreach ($r in $rows) {
+        if     ([int]$r.State -eq 1) { $sel[$r.Ref.Key] = 'disable' }
+        elseif ([int]$r.State -eq 2) { $sel[$r.Ref.Key] = 'enable' }
+    }
+    $script:SelectedServices = $sel
+    $flags.Services = ($sel.Count -gt 0)
+}
+
 function Show-DebloatSubmenu {
     $rows = New-Object System.Collections.ArrayList
     $n = 0
@@ -5385,6 +5506,7 @@ function Show-InteractiveMenu {
     $aiInst = @($script:AiCliTools   | Where-Object { & $_.Detect }).Count
     $twInst = @($script:WindowsTweaks| Where-Object { Test-TweakApplied -Key $_.Key }).Count
     $uiInst = @($script:UiTweaks     | Where-Object { Test-UiTweakApplied -Key $_.Key }).Count
+    $svcInst = @($script:ServiceItems | Where-Object { Test-ServiceDisabled -Item $_ }).Count
     $dbInst = @($script:DebloatItems | Where-Object { Test-BloatRemoved -Item $_ }).Count
     $vsInst = if (Test-VSCodeInstalled) { 'installed' } else { '' }
     Stop-Spinner $sp
@@ -5398,6 +5520,7 @@ function Show-InteractiveMenu {
         @{ k='python';                        label='Python';       desc='Python 3' }
         @{ k='tweaks';      group='tweaks';  label='Tweaks';       desc='Windows tweaks (Enter to expand)'; marker=(Get-GroupMarkerText $twInst $script:WindowsTweaks.Count 'applied') }
         @{ k='uitweaks';    group='uitweaks';label='Explorer & UI'; desc='This PC / nav pane / context menu / registry tweaks (Enter to expand)'; marker=(Get-GroupMarkerText $uiInst $script:UiTweaks.Count 'applied') }
+        @{ k='services';    group='services';label='Services';      desc='Disable / re-enable safe Windows services (Enter to expand)'; marker=(Get-GroupMarkerText $svcInst $script:ServiceItems.Count 'disabled') }
         @{ k='dbeaver';                       label='DBeaver';      desc='DBeaver CE (database tool)' }
         @{ k='vlc';                           label='VLC';          desc='VLC Media Player' }
         @{ k='notepad++';                     label='Notepad++';    desc='Notepad++ text editor' }
@@ -5428,6 +5551,7 @@ function Show-InteractiveMenu {
                 'vscode'  { { Show-VSCodeSubmenu } }
                 'tweaks'  { { Show-TweaksSubmenu } }
                 'uitweaks'{ { Show-UiTweaksSubmenu } }
+                'services'{ { Show-ServicesSubmenu } }
                 'aicli'   { { Show-AiCliSubmenu } }
                 'debloat' { { Show-DebloatSubmenu } }
             }
@@ -5436,6 +5560,7 @@ function Show-InteractiveMenu {
                 'vscode'  { { [bool]$flags.VSCode -or $script:SelectedVSCodeExt.Count -gt 0 } }
                 'tweaks'  { { $script:SelectedTweaks.Count -gt 0 -or $script:SelectedAliases.Count -gt 0 } }
                 'uitweaks'{ { $script:SelectedUiTweaks.Count -gt 0 } }
+                'services'{ { $script:SelectedServices.Count -gt 0 } }
                 'aicli'   { { @($script:AiCliTools | Where-Object { $flags[$_.Flag] }).Count -gt 0 } }
                 'debloat' { { $script:SelectedDebloat.Count -gt 0 } }
             }
@@ -5455,6 +5580,7 @@ function Show-InteractiveMenu {
         $ai = @($script:AiCliTools   | Where-Object { $flags[$_.Flag] } | ForEach-Object { $_.Key });   if ($ai.Count) { $parts += "AI[$($ai -join ',')]" }
         if ($script:SelectedTweaks.Count)  { $parts += "Tweaks[$($script:SelectedTweaks.Count)]" }
         if ($script:SelectedUiTweaks.Count) { $parts += "UI[$($script:SelectedUiTweaks.Count)]" }
+        if ($script:SelectedServices.Count) { $parts += "Svc[$($script:SelectedServices.Count)]" }
         if ($script:SelectedDebloat.Count) { $parts += "Debloat[$($script:SelectedDebloat.Count)]" }
         if ($script:SelectedAliases.Count) { $parts += "Aliases[$($script:SelectedAliases.Count)]" }
         if ($flags.VSCode) { $parts += 'VSCode' }
@@ -5482,7 +5608,8 @@ function Show-InteractiveMenu {
         $script:SelectedTweaks = @(); $script:SelectedDebloat = @(); $script:SelectedVSCodeExt = @()
         $script:SelectedAliases = @(); $script:AliasesTouched = $true
         $script:SelectedUiTweaks = @{}
-        $flags.Tweaks = $false; $flags.Debloat = $false; $flags.VSCode = $false; $flags.UiTweaks = $false
+        $script:SelectedServices = @{}
+        $flags.Tweaks = $false; $flags.Debloat = $false; $flags.VSCode = $false; $flags.UiTweaks = $false; $flags.Services = $false
     }
 
     $result = Invoke-SelectMenu -Header (Get-HeaderLines) -Banner 'Select what to install / apply' `
@@ -5577,6 +5704,20 @@ function Invoke-UiTweaks {
     }
 }
 
+function Invoke-Services {
+    if (-not $script:SelectedServices -or $script:SelectedServices.Count -eq 0) { Show-ServicesSubmenu }
+    if (-not $script:SelectedServices -or $script:SelectedServices.Count -eq 0) { return }
+    Write-LogStep "Configuring services"
+    foreach ($t in $script:ServiceItems) {
+        if (-not $script:SelectedServices.ContainsKey($t.Key)) { continue }
+        if ($script:SelectedServices[$t.Key] -eq 'enable') {
+            $ok = Enable-ServiceItem -Item $t;  Add-Summary "Enable service: $($t.Label)" ([bool]$ok)
+        } else {
+            $ok = Disable-ServiceItem -Item $t; Add-Summary "Disable service: $($t.Label)" ([bool]$ok)
+        }
+    }
+}
+
 #-------------------------------------------------------------------------------
 # Install a single catalog item (with vscode special-casing)
 #-------------------------------------------------------------------------------
@@ -5618,6 +5759,7 @@ function Invoke-Installations {
     # Windows tweaks / Explorer-UI tweaks / debloat
     if ($flags.Tweaks)   { Invoke-Tweaks }
     if ($flags.UiTweaks) { Invoke-UiTweaks }
+    if ($flags.Services) { Invoke-Services }
     if ($flags.Debloat) {
         if (-not $script:SelectedDebloat -or $script:SelectedDebloat.Count -eq 0) { Show-DebloatSubmenu }
         Invoke-Debloat

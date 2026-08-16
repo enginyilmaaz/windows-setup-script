@@ -196,6 +196,10 @@ Remove pre-installed Windows apps and (optionally) the dev tools/browsers this s
 
 > ⚠️ **Edge** is protected by Windows; force-removal can affect WebView-dependent apps and Windows may reinstall it on major updates. It is strictly opt-in from the Debloat sub-menu.
 
+### 🧰 Services (`--services`)
+
+Tri-state submenu (`[x]` = disable, `[r]` = re-enable to the default start type) for ~47 Windows services that are **safe to turn off** — disabling one only stops that feature, never core networking / audio / notifications / time / MS-account. Grouped: telemetry & diagnostics, security/legacy, Xbox, print/scan/fax, and sensors/biometric/location/payments. Core services (networking, audio, updates, connected-devices, per-user `_LUID` services) are deliberately **not** listed. Edit `$script:ServiceItems` to customise. Nothing here is selected by `a` (all).
+
 ## 🎛️ Interactive Menu
 
 Run without flags (or with `--menu`) for a keyboard-driven menu:
