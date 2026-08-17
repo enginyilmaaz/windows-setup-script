@@ -120,6 +120,8 @@ Everything below is reachable through the interactive menu (`--menu`) or directl
 | Disable Windows Search | Stop + disable the `WSearch` indexer service |
 | Disable Windows Updates | Set the `NoAutoUpdate` policy and disable the update services (⚠️ stops security patches) |
 | Windows Update: never auto-restart | Set `NoAutoRebootWithLoggedOnUsers` so updates still install but the PC never reboots on its own — waits for a manual restart |
+| Disable Hyper-V | `bcdedit hypervisorlaunchtype off` + disable Hyper-V / Virtual Machine Platform features (⚠️ breaks WSL2 & Windows Sandbox; reboot) |
+| VMware/VirtualBox setup | Disable Hyper-V **+** VBS **+** Memory Integrity (HVCI) **+** Credential Guard so VMware/VirtualBox get full VT-x (⚠️ weakens Win11 security; reboot) |
 | Activate Error Reporting | Enable Windows Error Reporting |
 | Enable System Restore | Turn on system protection for the system drive (shadow storage capped at 10GB) |
 | Install Windhawk + taskbar mods | Install Windhawk (latest GitHub release, 2.0+, which ships `windhawk-cli.exe`) and the `taskbar-grouping`, `start-menu-size`, and `taskbar-volume-control` mods via the CLI (runs under the script's own elevation — no extra UAC) |
@@ -162,6 +164,7 @@ Every entry is a **two-way toggle**. In the submenu, **SPACE** cycles each row `
 | Action Center | Disable the notification centre (policy) | Re-enable |
 | Lock screen | Disable for all users (policy) | Re-enable |
 | Search box | Disable web suggestions | Re-enable |
+| Search web results | Turn off Bing/web + Store/cloud results in Start search (local search stays) | Re-enable |
 | NumLock | On at the logon screen **and** after sign-in | Off |
 | Superfetch / Prefetch | Stop + disable `SysMain`, `EnablePrefetcher=0`, clear the Prefetch cache | Re-enable (`start=auto`, `EnablePrefetcher=3`) |
 | Windows Photo Viewer | Re-register it for `.tif .tiff .png .bmp .jpeg .jpg .ico` | Unregister |

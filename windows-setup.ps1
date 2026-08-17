@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.9.0'
-$script:SCRIPT_REVISION = '43'
+$script:SCRIPT_VERSION  = '1.9.1'
+$script:SCRIPT_REVISION = '44'
 $script:SCRIPT_DATE     = '2026-08-14'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -570,6 +570,8 @@ $script:WindowsTweaks = @(
     @{ Key='disable-search';   Label='Disable Windows Search (WSearch service)'; Apply='Disable-WindowsSearchService' }
     @{ Key='disable-updates';  Label='Disable Windows Updates';              Apply='Disable-WindowsUpdates' }
     @{ Key='no-auto-restart';  Label='Windows Update: never auto-restart';   Apply='Disable-WindowsUpdateAutoRestart' }
+    @{ Key='disable-hyperv';   Label='Disable Hyper-V (breaks WSL2/Sandbox)';Apply='Disable-HyperV' }
+    @{ Key='vmware-setup';     Label='VMware/VirtualBox setup (off: Hyper-V+VBS+Mem Integrity+Cred Guard)'; Apply='Set-VMwareHypervisor' }
     @{ Key='error-reporting';  Label='Activate Error Reporting';             Apply='Enable-WindowsErrorReporting' }
     @{ Key='enable-restore';   Label='Enable System Restore';                Apply='Enable-SystemRestore' }
     @{ Key='windhawk';         Label='Install Windhawk + taskbar mods (2.0-alpha)'; Apply='Install-Windhawk' }
@@ -604,6 +606,7 @@ $script:UiTweaks = @(
     @{ Key='action-center';      Label='Disable Action Center / notifications';        Apply='Disable-ActionCenter';         Revert='Enable-ActionCenter' }
     @{ Key='lock-screen';        Label='Disable the lock screen';                      Apply='Disable-LockScreen';           Revert='Enable-LockScreen' }
     @{ Key='search-suggestions'; Label='Disable search box web suggestions';           Apply='Disable-SearchBoxSuggestions'; Revert='Enable-SearchBoxSuggestions' }
+    @{ Key='search-web';         Label='Search: disable web / Bing / Store results';   Apply='Disable-SearchWebResults';     Revert='Enable-SearchWebResults' }
     @{ Key='numlock';            Label='NumLock on at boot';                           Apply='Enable-NumLockAtBoot';         Revert='Disable-NumLockAtBoot' }
     @{ Key='superfetch';         Label='Disable Superfetch (SysMain) + Prefetch';      Apply='Disable-SuperfetchPrefetch';   Revert='Enable-SuperfetchPrefetch' }
     @{ Key='photo-viewer';       Label='Restore the classic Windows Photo Viewer';     Apply='Restore-WindowsPhotoViewer';   Revert='Remove-WindowsPhotoViewer' }
@@ -2804,6 +2807,53 @@ function Disable-WindowsUpdateAutoRestart {
     }
 }
 
+# Shared: turn off the Windows hypervisor + the Hyper-V-family optional features.
+# bcdedit hypervisorlaunchtype=off is the key step that frees hardware
+# virtualization for VMware/VirtualBox; the feature-disables remove the stack.
+function Disable-HyperVStack {
+    & bcdedit.exe /set hypervisorlaunchtype off > $null 2>&1
+    foreach ($f in 'Microsoft-Hyper-V-All', 'HypervisorPlatform', 'VirtualMachinePlatform', 'Containers-DisposableClientVM') {
+        try { Disable-WindowsOptionalFeature -Online -FeatureName $f -NoRestart -ErrorAction SilentlyContinue | Out-Null } catch { }
+    }
+}
+
+# Disable Hyper-V (and the whole virtualization stack). Breaks WSL2 / Windows
+# Sandbox. Reboot required.
+function Disable-HyperV {
+    Write-LogWarning "Disabling Hyper-V + Virtual Machine Platform - this also breaks WSL2 and Windows Sandbox. Reboot required."
+    try {
+        Disable-HyperVStack
+        Write-LogSuccess "Hyper-V disabled (hypervisorlaunchtype off). REBOOT to apply."
+        return $true
+    } catch { Write-LogWarning "Could not disable Hyper-V: $($_.Exception.Message)"; return $false }
+}
+
+# VMware/VirtualBox hypervisor setup: everything a third-party hypervisor needs -
+# Hyper-V off + VBS + Memory Integrity (HVCI) + Credential Guard off. SECURITY:
+# this turns off Win11 virtualization-based protections. Reboot required.
+function Set-VMwareHypervisor {
+    Write-LogWarning "Preparing for VMware/VirtualBox: disabling Hyper-V, VBS, Memory Integrity and Credential Guard. This WEAKENS Win11 security and needs a REBOOT."
+    try {
+        # 1) Hyper-V stack + hypervisor launch off
+        Disable-HyperVStack
+        # 2) Virtualization-Based Security off (control + policy)
+        foreach ($k in @('HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard',
+                         'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard')) {
+            if (-not (Test-Path -LiteralPath $k)) { New-Item -Path $k -Force | Out-Null }
+            New-ItemProperty -LiteralPath $k -Name 'EnableVirtualizationBasedSecurity' -Value 0 -PropertyType DWord -Force | Out-Null
+        }
+        # 3) Memory Integrity (HVCI) off
+        $hvci = 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity'
+        if (-not (Test-Path -LiteralPath $hvci)) { New-Item -Path $hvci -Force | Out-Null }
+        New-ItemProperty -LiteralPath $hvci -Name 'Enabled' -Value 0 -PropertyType DWord -Force | Out-Null
+        # 4) Credential Guard off
+        New-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name 'LsaCfgFlags' -Value 0 -PropertyType DWord -Force | Out-Null
+        New-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard' -Name 'LsaCfgFlags' -Value 0 -PropertyType DWord -Force | Out-Null
+        Write-LogSuccess "VMware prep done: Hyper-V / VBS / Memory Integrity / Credential Guard disabled. REBOOT to apply, then VMware runs with full VT-x."
+        return $true
+    } catch { Write-LogWarning "Could not complete the VMware setup: $($_.Exception.Message)"; return $false }
+}
+
 # Enable Windows Error Reporting (WER). Mirrors "Activate Apport".
 function Enable-WindowsErrorReporting {
     Write-LogInfo "Enabling Windows Error Reporting..."
@@ -3083,6 +3133,15 @@ function Test-TweakApplied {
             'no-auto-restart' {
                 $v = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -Name 'NoAutoRebootWithLoggedOnUsers' -ErrorAction SilentlyContinue).NoAutoRebootWithLoggedOnUsers
                 return ($v -eq 1)
+            }
+            'disable-hyperv' {
+                $out = & bcdedit.exe /enum '{current}' 2>$null | Out-String
+                return ($out -match 'hypervisorlaunchtype\s+Off')
+            }
+            'vmware-setup' {
+                $v = (Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity' -Name 'Enabled' -ErrorAction SilentlyContinue).Enabled
+                $b = (Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard' -Name 'EnableVirtualizationBasedSecurity' -ErrorAction SilentlyContinue).EnableVirtualizationBasedSecurity
+                return (($v -eq 0) -and ($b -eq 0))
             }
             'error-reporting' {
                 $v = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting' -Name 'Disabled' -ErrorAction SilentlyContinue).Disabled
@@ -3662,6 +3721,30 @@ function Enable-SearchBoxSuggestions {
     return $ok
 }
 
+# Start-menu search: turn Bing/web + Store/cloud results off (or back on). Keeps
+# local file/app search; only the online results go away.
+$script:SEARCH_HKCU = 'HKCU\Software\Microsoft\Windows\CurrentVersion\Search'
+$script:SEARCH_POL_HKLM = 'HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows Search'
+function Disable-SearchWebResults {
+    Write-LogInfo "Disabling web / Bing / Store results in Windows Search (local search stays)..."
+    Set-UiRegValue -RegPath $script:SEARCH_HKCU -Name 'BingSearchEnabled' -Value 0 | Out-Null
+    Set-UiRegValue -RegPath $script:SEARCH_HKCU -Name 'CortanaConsent'    -Value 0 | Out-Null
+    Set-UiRegValue -RegPath $script:SEARCH_POL_HKLM -Name 'DisableWebSearch'        -Value 1 | Out-Null
+    Set-UiRegValue -RegPath $script:SEARCH_POL_HKLM -Name 'ConnectedSearchUseWeb'   -Value 0 | Out-Null
+    Restart-Explorer
+    Write-LogSuccess "Windows Search web/Store results disabled (Explorer restarted)."
+    return $true
+}
+function Enable-SearchWebResults {
+    Write-LogInfo "Re-enabling web / Bing results in Windows Search..."
+    Set-UiRegValue -RegPath $script:SEARCH_HKCU -Name 'BingSearchEnabled' -Value 1 | Out-Null
+    Remove-UiRegValue -RegPath $script:SEARCH_POL_HKLM -Name 'DisableWebSearch' | Out-Null
+    Remove-UiRegValue -RegPath $script:SEARCH_POL_HKLM -Name 'ConnectedSearchUseWeb' | Out-Null
+    Restart-Explorer
+    Write-LogSuccess "Windows Search web results re-enabled (Explorer restarted)."
+    return $true
+}
+
 #-------------------------------------------------------------------------------
 # NumLock at boot
 #-------------------------------------------------------------------------------
@@ -3870,6 +3953,10 @@ function Test-UiTweakApplied {
             'search-suggestions' {
                 $v = Get-UiRegValue -RegPath $script:SEARCH_POLICY_KEY -Name 'DisableSearchBoxSuggestions'
                 return ($null -ne $v -and [int]$v -eq 1)
+            }
+            'search-web' {
+                $v = Get-UiRegValue -RegPath $script:SEARCH_HKCU -Name 'BingSearchEnabled'
+                return ($null -ne $v -and [int]$v -eq 0)
             }
             'numlock' {
                 $v = Get-UiRegValue -RegPath $script:NUMLOCK_KEY_DEFAULT -Name 'InitialKeyboardIndicators'
