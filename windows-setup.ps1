@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.9.1'
-$script:SCRIPT_REVISION = '44'
+$script:SCRIPT_VERSION  = '1.9.2'
+$script:SCRIPT_REVISION = '45'
 $script:SCRIPT_DATE     = '2026-08-14'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -1770,18 +1770,16 @@ function Test-RealVNCInstalled {
 }
 
 function Install-RealVNC {
-    return Install-App -Name 'RealVNC Connect (Server)' `
+    # Installs the SERVER (the side you remote INTO) - NOT the Viewer. The old
+    # RealVNC.VNCServer id is 7.18 and often fails; prefer the current "RealVNC
+    # Connect" package (8.x), then fall back to the old id, then choco.
+    return Install-App -Name 'RealVNC Server' `
         -Detect { Test-RealVNCInstalled } `
+        -Direct {
+            winget install --id RealVNC.RealVNCConnct -e --silent --accept-package-agreements --accept-source-agreements
+        } `
         -WingetId 'RealVNC.VNCServer' `
-        -ChocoId 'realvnc' `
-        -PostInstall {
-            # Also offer the VNC Viewer (best-effort; never fails the install).
-            if (Test-Command 'winget') {
-                Write-LogInfo 'RealVNC: also offering VNC Viewer (RealVNC.VNCViewer)...'
-                winget install --id 'RealVNC.VNCViewer' -e --silent `
-                    --accept-package-agreements --accept-source-agreements 2>$null | Out-Null
-            }
-        }
+        -ChocoId 'realvnc'
 }
 
 #-------------------------------------------------------------------------------
