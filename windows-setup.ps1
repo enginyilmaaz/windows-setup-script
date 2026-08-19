@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.9.3'
-$script:SCRIPT_REVISION = '46'
+$script:SCRIPT_VERSION  = '1.9.4'
+$script:SCRIPT_REVISION = '47'
 $script:SCRIPT_DATE     = '2026-08-19'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -227,8 +227,10 @@ function Invoke-Elevation {
     $argLine = ($script:RAW_ARGS -join ' ').Trim()
     $ps = Get-PowerShellPath
     try {
+        # -NoExit keeps the elevated window open after the script finishes, so the
+        # summary stays on screen (this window is separate and would otherwise close).
         if ($PSCommandPath -and (Test-Path -LiteralPath $PSCommandPath)) {
-            $spArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
+            $spArgs = "-NoProfile -NoExit -ExecutionPolicy Bypass -File `"$PSCommandPath`""
             if ($argLine) { $spArgs += " $argLine" }
         } else {
             if ($argLine) {
@@ -236,7 +238,7 @@ function Invoke-Elevation {
             } else {
                 $inner = "irm '$($script:SELF_URL)' | iex"
             }
-            $spArgs = "-NoProfile -ExecutionPolicy Bypass -Command `"$inner`""
+            $spArgs = "-NoProfile -NoExit -ExecutionPolicy Bypass -Command `"$inner`""
         }
         Start-Process -FilePath $ps -Verb RunAs -ArgumentList $spArgs | Out-Null
     } catch {
@@ -5991,14 +5993,12 @@ function main {
 
     if ($flags.Login) { Invoke-CliLogins }
 
-    # Keep the window open so the summary stays readable. The script self-elevates
-    # into a separate window that would otherwise close the instant it finishes.
-    # ReadKey throws when there is no real console (piped/headless) -> no-op there.
-    try {
-        Write-Host ""
-        Write-Host "  Done - press any key to close this window..." -ForegroundColor Cyan
-        [void][System.Console]::ReadKey($true)
-    } catch { }
+    # The elevated window is launched with -NoExit, so it stays open here at a
+    # prompt - the summary above remains readable. As a fallback for consoles that
+    # were NOT started with -NoExit, wait for a keypress too (no-op if no console).
+    Write-Host ""
+    Write-Host "  All done - review the summary above. This window will stay open; close it when finished." -ForegroundColor Cyan
+    try { [void][System.Console]::ReadKey($true) } catch { }
 }
 
 main
