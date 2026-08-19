@@ -155,7 +155,8 @@ Every entry is a **two-way toggle**. In the submenu, **SPACE** cycles each row `
 | Nav pane: removable drives | Remove the duplicate drive entries | Restore them |
 | Nav pane: Gallery | Hide Gallery (Windows 11) | Show Gallery |
 | Nav pane: Home | Hide Home (Windows 11) | Show Home |
-| Quick Access | Hide frequently-used folders | Show them |
+| Quick Access | Hide recently-used files **and** frequently-used folders | Show them |
+| Explorer: open to This PC | Open File Explorer at **This PC** instead of Quick Access / Home | Back to Quick Access / Home |
 | Quick Access: Desktop | Pin the Desktop folder to Quick Access | Unpin it |
 | Win11 context menu | Restore the classic (full) right-click menu | Back to the compact Win11 menu |
 | Context menu: Share with | Remove the `Sharing` shell handlers | Re-import from backup |

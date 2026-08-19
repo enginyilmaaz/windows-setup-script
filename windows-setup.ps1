@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.9.5'
-$script:SCRIPT_REVISION = '48'
+$script:SCRIPT_VERSION  = '1.9.6'
+$script:SCRIPT_REVISION = '49'
 $script:SCRIPT_DATE     = '2026-08-19'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -614,7 +614,8 @@ $script:UiTweaks = @(
     @{ Key='nav-drives';         Label='Nav pane: remove duplicate removable drives';  Apply='Remove-NavPaneDrives';         Revert='Restore-NavPaneDrives' }
     @{ Key='nav-gallery';        Label='Nav pane: remove Gallery (Win11)';             Apply='Remove-NavPaneGallery';        Revert='Restore-NavPaneGallery' }
     @{ Key='nav-home';           Label='Nav pane: remove Home (Win11)';                Apply='Remove-NavPaneHome';           Revert='Restore-NavPaneHome' }
-    @{ Key='quick-access';       Label='Quick Access: hide frequent folders';          Apply='Hide-QuickAccessFrequent';     Revert='Show-QuickAccessFrequent' }
+    @{ Key='quick-access';       Label='Quick Access: hide recent files + frequent folders'; Apply='Hide-QuickAccessFrequent';     Revert='Show-QuickAccessFrequent' }
+    @{ Key='launch-thispc';      Label='Explorer: open to This PC (not Quick Access/Home)';   Apply='Set-ExplorerLaunchToThisPc';   Revert='Restore-ExplorerLaunchToQuickAccess' }
     @{ Key='pin-desktop-qa';     Label='Quick Access: pin Desktop folder';             Apply='Add-DesktopToQuickAccess';     Revert='Remove-DesktopFromQuickAccess' }
     @{ Key='classic-context';    Label='Win11: classic (full) right-click menu';       Apply='Enable-ClassicContextMenu';    Revert='Disable-ClassicContextMenu' }
     @{ Key='ctx-share';          Label="Context menu: remove 'Share with'";            Apply='Remove-ShareContextMenu';      Revert='Restore-ShareContextMenu' }
@@ -3517,17 +3518,35 @@ function Restore-NavPaneDrives {
 $script:QUICK_ACCESS_KEY = 'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer'
 
 function Hide-QuickAccessFrequent {
-    Write-LogInfo "Hiding frequently-used folders in Quick Access..."
-    $ok = Set-UiRegValue -RegPath $script:QUICK_ACCESS_KEY -Name 'ShowFrequent' -Value 0
+    Write-LogInfo "Hiding recently-used files and frequently-used folders in Quick Access..."
+    $ok1 = Set-UiRegValue -RegPath $script:QUICK_ACCESS_KEY -Name 'ShowFrequent' -Value 0
+    $ok2 = Set-UiRegValue -RegPath $script:QUICK_ACCESS_KEY -Name 'ShowRecent'   -Value 0
     Restart-Explorer
-    if ($ok) { Write-LogSuccess "Frequent folders hidden (Explorer restarted)." }
-    return $ok
+    if ($ok1 -and $ok2) { Write-LogSuccess "Quick Access history (recent files + frequent folders) hidden (Explorer restarted)." }
+    return ($ok1 -and $ok2)
 }
 function Show-QuickAccessFrequent {
-    Write-LogInfo "Showing frequently-used folders in Quick Access..."
-    $ok = Set-UiRegValue -RegPath $script:QUICK_ACCESS_KEY -Name 'ShowFrequent' -Value 1
+    Write-LogInfo "Showing recently-used files and frequently-used folders in Quick Access..."
+    $ok1 = Set-UiRegValue -RegPath $script:QUICK_ACCESS_KEY -Name 'ShowFrequent' -Value 1
+    $ok2 = Set-UiRegValue -RegPath $script:QUICK_ACCESS_KEY -Name 'ShowRecent'   -Value 1
     Restart-Explorer
-    if ($ok) { Write-LogSuccess "Frequent folders shown (Explorer restarted)." }
+    if ($ok1 -and $ok2) { Write-LogSuccess "Quick Access history restored (Explorer restarted)." }
+    return ($ok1 -and $ok2)
+}
+
+# Explorer: what File Explorer opens to. LaunchTo 1 = This PC, 2 = Quick Access
+# (Win11 "Home"), 3 = Downloads. Applies to newly-opened Explorer windows.
+$script:EXPLORER_ADVANCED_KEY = 'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
+function Set-ExplorerLaunchToThisPc {
+    Write-LogInfo "Setting File Explorer to open at 'This PC'..."
+    $ok = Set-UiRegValue -RegPath $script:EXPLORER_ADVANCED_KEY -Name 'LaunchTo' -Value 1
+    if ($ok) { Write-LogSuccess "File Explorer will open at This PC (new windows)." }
+    return $ok
+}
+function Restore-ExplorerLaunchToQuickAccess {
+    Write-LogInfo "Restoring File Explorer to open at Quick Access / Home..."
+    $ok = Set-UiRegValue -RegPath $script:EXPLORER_ADVANCED_KEY -Name 'LaunchTo' -Value 2
+    if ($ok) { Write-LogSuccess "File Explorer will open at Quick Access / Home (new windows)." }
     return $ok
 }
 
@@ -3935,8 +3954,13 @@ function Test-UiTweakApplied {
                 return $true
             }
             'quick-access' {
-                $v = Get-UiRegValue -RegPath $script:QUICK_ACCESS_KEY -Name 'ShowFrequent'
-                return ($null -ne $v -and [int]$v -eq 0)
+                $vf = Get-UiRegValue -RegPath $script:QUICK_ACCESS_KEY -Name 'ShowFrequent'
+                $vr = Get-UiRegValue -RegPath $script:QUICK_ACCESS_KEY -Name 'ShowRecent'
+                return ($null -ne $vf -and [int]$vf -eq 0 -and $null -ne $vr -and [int]$vr -eq 0)
+            }
+            'launch-thispc' {
+                $v = Get-UiRegValue -RegPath $script:EXPLORER_ADVANCED_KEY -Name 'LaunchTo'
+                return ($null -ne $v -and [int]$v -eq 1)
             }
             'pin-desktop-qa' { return (Test-DesktopPinnedQA) }
             'classic-context' {
