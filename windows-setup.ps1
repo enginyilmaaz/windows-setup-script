@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.9.4'
-$script:SCRIPT_REVISION = '47'
+$script:SCRIPT_VERSION  = '1.9.5'
+$script:SCRIPT_REVISION = '48'
 $script:SCRIPT_DATE     = '2026-08-19'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -380,6 +380,18 @@ function Install-Prerequisites {
     if (-not (Test-Winget)) {
         Write-LogWarning "winget (App Installer) not found. Some installs will fall back to direct download / Chocolatey."
     }
+    # npm-installed CLIs (codex/claude/kimi/...) drop a .ps1 shim; with a Restricted
+    # execution policy they fail with "running scripts is disabled on this system".
+    # Relax to RemoteSigned so those shims run in new shells. Set LocalMachine (we're
+    # elevated -> covers every user) AND CurrentUser (wins over LocalMachine).
+    foreach ($scope in 'LocalMachine', 'CurrentUser') {
+        try {
+            if ((Get-ExecutionPolicy -Scope $scope -ErrorAction SilentlyContinue) -in @('Restricted', 'Undefined', 'AllSigned')) {
+                Set-ExecutionPolicy -Scope $scope -ExecutionPolicy RemoteSigned -Force -ErrorAction SilentlyContinue
+            }
+        } catch { }
+    }
+    Write-LogInfo "PowerShell execution policy relaxed to RemoteSigned so npm CLI shims (codex/claude/...) run."
 }
 
 #===============================================================================
