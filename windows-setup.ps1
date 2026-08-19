@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.9.6'
-$script:SCRIPT_REVISION = '49'
+$script:SCRIPT_VERSION  = '1.9.7'
+$script:SCRIPT_REVISION = '50'
 $script:SCRIPT_DATE     = '2026-08-19'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -59,6 +59,7 @@ $flags = @{
     Gh         = $false; Postman = $false; FileZilla = $false; NotepadPP = $false
     ShareX     = $false; Firefox = $false; WhatsApp = $false
     WinRAR     = $false; Spotify = $false; PowerManager = $false; RevoPro = $false
+    Git        = $false; LocalSend = $false
     # AI CLI
     Claude     = $false; Codex = $false; Kimi = $false; Grok = $false
     Gemini     = $false; Qwen = $false; Opencode = $false
@@ -113,6 +114,8 @@ foreach ($arg in $script:RAW_ARGS) {
         'gh'          { $flags.Gh = $true }
         'postman'     { $flags.Postman = $true }
         'filezilla'   { $flags.FileZilla = $true }
+        'git'         { $flags.Git = $true }
+        'localsend'   { $flags.LocalSend = $true }
         # AI CLI
         'claude'      { $flags.Claude = $true }
         'codex'       { $flags.Codex = $true }
@@ -156,7 +159,7 @@ foreach ($arg in $script:RAW_ARGS) {
 if ($flags.All) {
     # NOTE: interactive/GUI installers (Vlc, Firefox, WhatsApp) are left OUT of --all
     # so the unattended run doesn't block on their setup windows; pick them individually.
-    foreach ($k in @('NodeJs','Python','Docker','Chrome','VSCode','DBeaver','Cloudflared','Gh','Postman','FileZilla','NotepadPP','ShareX','WinRAR','PowerManager','RevoPro','AiCli','Remote')) {
+    foreach ($k in @('NodeJs','Python','Docker','Chrome','VSCode','DBeaver','Cloudflared','Gh','Git','LocalSend','Postman','FileZilla','NotepadPP','ShareX','WinRAR','PowerManager','RevoPro','AiCli','Remote')) {
         $flags[$k] = $true
     }
 }
@@ -479,9 +482,11 @@ DEV TOOLS:
   --dbeaver         DBeaver Community
   --vlc             VLC Media Player
   --cloudflared     Cloudflare Tunnel client
+  --git             Git for Windows
   --gh              GitHub CLI
   --postman         Postman
   --filezilla       FileZilla
+  --localsend       LocalSend (local file sharing)
 
 AI CLI TOOLS:
   --claude          Claude Code (Anthropic)
@@ -544,9 +549,11 @@ $script:DevTools = @(
     @{ Key='power-manager'; Flag='PowerManager'; Label='Windows Auto Power Manager'; Install='Install-PowerManager'; Detect='Test-PowerManagerInstalled' }
     @{ Key='revo';        Flag='RevoPro';     Label='Revo Uninstaller Pro';   Install='Install-RevoPro';     Detect='Test-RevoProInstalled' }
     @{ Key='cloudflared'; Flag='Cloudflared'; Label='Cloudflare Tunnel';      Install='Install-Cloudflared'; Detect='Test-CloudflaredInstalled' }
+    @{ Key='git';         Flag='Git';         Label='Git for Windows';        Install='Install-Git';         Detect='Test-GitInstalled' }
     @{ Key='gh';          Flag='Gh';          Label='GitHub CLI';             Install='Install-Gh';          Detect='Test-GhInstalled' }
     @{ Key='postman';     Flag='Postman';     Label='Postman';                Install='Install-Postman';     Detect='Test-PostmanInstalled' }
     @{ Key='filezilla';   Flag='FileZilla';   Label='FileZilla';              Install='Install-FileZilla';   Detect='Test-FileZillaInstalled' }
+    @{ Key='localsend';   Flag='LocalSend';   Label='LocalSend';              Install='Install-LocalSend';   Detect='Test-LocalSendInstalled' }
 )
 
 # AI CLI tools (submenu group)
@@ -1285,6 +1292,22 @@ function Install-ShareX {
         -WingetId 'ShareX.ShareX' -ChocoId 'sharex'
 }
 function Test-ShareXInstalled { Test-App -DisplayNameLike '*ShareX*' }
+
+function Install-Git {
+    return Install-App -Name 'Git for Windows' `
+        -Detect { Test-GitInstalled } `
+        -WingetId 'Git.Git' -ChocoId 'git'
+}
+# Registry name is "Git version X.Y.Z" (immediate post-install); Test-Command is a
+# PATH-based fallback. '*Git version*' avoids matching GitHub CLI / Git Extensions.
+function Test-GitInstalled { (Test-App -DisplayNameLike '*Git version*') -or (Test-Command 'git') }
+
+function Install-LocalSend {
+    return Install-App -Name 'LocalSend' `
+        -Detect { Test-App -DisplayNameLike '*LocalSend*' } `
+        -WingetId 'LocalSend.LocalSend' -ChocoId 'localsend'
+}
+function Test-LocalSendInstalled { Test-App -DisplayNameLike '*LocalSend*' }
 
 function Install-Firefox { Install-WingetInteractive -Name 'Mozilla Firefox' -Id 'Mozilla.Firefox' -Detect { Test-FirefoxInstalled } }
 function Test-FirefoxInstalled { Test-App -DisplayNameLike '*Mozilla Firefox*' }
@@ -5672,9 +5695,11 @@ function Show-InteractiveMenu {
         @{ k='cloudflared';                   label='Cloudflared';  desc='Cloudflare Tunnel client' }
         @{ k='docker';                        label='Docker';       desc='Docker Desktop' }
         @{ k='aicli';       group='aicli';   label='AI CLI Tools'; desc='Claude, Codex, Kimi, Grok, Gemini, Qwen, GLM (Enter to expand)'; marker=(Get-GroupMarkerText $aiInst $script:AiCliTools.Count 'installed') }
+        @{ k='git';                           label='Git';          desc='Git for Windows (version control)' }
         @{ k='gh';                            label='GitHub CLI';   desc='GitHub CLI (gh)' }
         @{ k='postman';                       label='Postman';      desc='Postman (API testing)' }
         @{ k='filezilla';                     label='FileZilla';    desc='FileZilla (FTP/SFTP)' }
+        @{ k='localsend';                     label='LocalSend';    desc='LocalSend (local file sharing)' }
         @{ k='debloat';     group='debloat'; label='Debloat';      desc='Remove pre-installed apps (Enter to expand)'; marker=(Get-GroupMarkerText $dbInst $script:DebloatItems.Count 'removed') }
     )
 

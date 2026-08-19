@@ -57,9 +57,11 @@ Everything below is reachable through the interactive menu (`--menu`) or directl
 | `--dbeaver` | DBeaver Community (database tool) |
 | `--vlc` | VLC Media Player (opens the installer window) |
 | `--cloudflared` | Cloudflare Tunnel client |
+| `--git` | Git for Windows (version control) |
 | `--gh` | GitHub CLI (`gh`) |
 | `--postman` | Postman |
 | `--filezilla` | FileZilla (FTP/SFTP client) |
+| `--localsend` | LocalSend (local network file sharing) |
 | `--notepad++` | Notepad++ text editor |
 | `--sharex` | ShareX screen capture |
 | `--firefox` | Firefox (opens the installer window) |
