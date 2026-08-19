@@ -24,9 +24,9 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.9.2'
-$script:SCRIPT_REVISION = '45'
-$script:SCRIPT_DATE     = '2026-08-14'
+$script:SCRIPT_VERSION  = '1.9.3'
+$script:SCRIPT_REVISION = '46'
+$script:SCRIPT_DATE     = '2026-08-19'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
 $script:SELF_URL = 'https://bit.ly/windows-ey'
@@ -257,10 +257,13 @@ function Invoke-WithRetry {
         [int]$MaxAttempts = 3,
         [int]$DelaySeconds = 5
     )
+    # winget returns non-zero when there's nothing to do; treat those as success:
+    #   0x8A15002B (-1978335189) = no applicable upgrade, 0x8A150061 (-1978335135) = already installed.
+    $okCodes = @(0, -1978335189, -1978335135)
     for ($i = 1; $i -le $MaxAttempts; $i++) {
         try {
             & $Action
-            if ($LASTEXITCODE -eq $null -or $LASTEXITCODE -eq 0) { return $true }
+            if ($null -eq $LASTEXITCODE -or $okCodes -contains $LASTEXITCODE) { return $true }
             Write-LogWarning "$Description failed (exit $LASTEXITCODE) - attempt $i/$MaxAttempts"
         } catch {
             Write-LogWarning "$Description failed ($($_.Exception.Message)) - attempt $i/$MaxAttempts"
@@ -5091,9 +5094,20 @@ function Remove-MicrosoftEdge {
             } catch { }
         }
 
-        # 11) Shortcuts + Run entries
-        Remove-Item -LiteralPath "$env:PUBLIC\Desktop\Microsoft Edge.lnk" -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Microsoft Edge.lnk" -Force -ErrorAction SilentlyContinue
+        # 11) Shortcuts (Desktop, Start menu, pinned taskbar - all users + current) + Run entries
+        $lnkDirs = @(
+            "$env:PUBLIC\Desktop",
+            "$env:USERPROFILE\Desktop",
+            "$env:ProgramData\Microsoft\Windows\Start Menu\Programs",
+            "$env:AppData\Microsoft\Windows\Start Menu\Programs",
+            "$env:AppData\Microsoft\Internet Explorer\Quick Launch",
+            "$env:AppData\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar",
+            "$env:AppData\Microsoft\Internet Explorer\Quick Launch\User Pinned\StartMenu"
+        )
+        foreach ($d in $lnkDirs) {
+            Get-ChildItem -Path $d -Filter 'Microsoft Edge*.lnk' -ErrorAction SilentlyContinue |
+                Remove-Item -Force -ErrorAction SilentlyContinue
+        }
         $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
         $ri = Get-Item -Path $run -ErrorAction SilentlyContinue
         if ($ri) {
@@ -5103,6 +5117,7 @@ function Remove-MicrosoftEdge {
                 }
             }
         }
+        Restart-Explorer   # refresh the taskbar so the removed Edge pin disappears
 
         if (Test-EdgeRemoved) { Write-LogSuccess "Edge removed."; return $true }
         Write-LogWarning "Edge uninstall ran but msedge.exe is still present (Windows may be re-protecting it); reboot and re-run if needed."
@@ -5975,6 +5990,15 @@ function main {
     }
 
     if ($flags.Login) { Invoke-CliLogins }
+
+    # Keep the window open so the summary stays readable. The script self-elevates
+    # into a separate window that would otherwise close the instant it finishes.
+    # ReadKey throws when there is no real console (piped/headless) -> no-op there.
+    try {
+        Write-Host ""
+        Write-Host "  Done - press any key to close this window..." -ForegroundColor Cyan
+        [void][System.Console]::ReadKey($true)
+    } catch { }
 }
 
 main
