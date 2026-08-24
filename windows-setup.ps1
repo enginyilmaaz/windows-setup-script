@@ -25,7 +25,7 @@
 #===============================================================================
 
 $script:SCRIPT_VERSION  = '1.9.7'
-$script:SCRIPT_REVISION = '52'
+$script:SCRIPT_REVISION = '53'
 $script:SCRIPT_DATE     = '2026-08-19'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -732,13 +732,15 @@ function Enable-ServiceItem {
     } catch { Write-LogWarning "Could not re-enable $($Item.Svc): $($_.Exception.Message)"; return $false }
 }
 
-# CLI aliases (own submenu group). cckimi/ccglm/ccor auto-bundle their *-token setter.
+# CLI aliases (own submenu group). cckimi/ccglm/ccor/ccart auto-bundle their *-token setter
+# (and, for the gateways, their *-model picker).
 $script:CliAliases = @(
     @{ Key='ccskip'; Label='ccskip  (Claude skip-permissions, Opus 4.8)' }
     @{ Key='cxskip'; Label='cxskip  (Claude skip-permissions, Opus 5)' }
     @{ Key='cckimi'; Label='cckimi  (Claude Code on the Kimi backend)  [+ cckimi-token]' }
     @{ Key='ccglm';  Label='ccglm   (Claude Code on the Z.AI GLM backend)  [+ ccglm-token]' }
     @{ Key='ccor';   Label='ccor    (Claude Code on OpenRouter, stealth/ox-alpha)  [+ ccor-token, ccor-model]' }
+    @{ Key='ccart';  Label='ccart   (Claude Code on AgentRouter, claude-opus-5)  [+ ccart-token, ccart-model]' }
 )
 
 # VS Code extensions (VS Code submenu) - IDs mirror the source install_vscode_extensions
@@ -2360,8 +2362,8 @@ function Remove-AliasEverywhere {
     }
 }
 
-# CLI Aliases: install ccskip / cxskip / cckimi / ccglm / ccor (Claude/Codex helpers) plus
-# cckimi-token / ccglm-token / ccor-token / ccor-model as standalone .cmd commands under %USERPROFILE%\apps\aliases
+# CLI Aliases: install ccskip / cxskip / cckimi / ccglm / ccor / ccart (Claude/Codex helpers) plus
+# their *-token / *-model setters as standalone .cmd commands under %USERPROFILE%\apps\aliases
 # and add that folder to PATH, so they work from ANY shell (cmd, PowerShell, Run). Pure
 # batch, one self-contained .cmd each - no .ps1. Env vars are scoped via setlocal to that
 # cmd process, so they don't leak into the caller. Mirrors setup_cli_shortcuts.
@@ -2547,14 +2549,137 @@ echo ccor-token: key written to %TOKENFILE% (current-user only).
 @echo off
 setlocal
 set "MODELFILE=%USERPROFILE%\.openrouter_model"
-set "id=%~1"
-if "%id%"=="" set /p id=ccor-model - paste an OpenRouter model id, browse https://openrouter.ai/models :
-if "%id%"=="" (
-    echo ccor-model: no id given.
+set "chosen="
+if not "%~1"=="" set "chosen=%~1"
+if not "%chosen%"=="" goto :save
+set "current="
+if exist "%MODELFILE%" set /p current=<"%MODELFILE%"
+echo ccor-model - pick a model:
+if "%current%"=="stealth/ox-alpha" (echo    1. stealth/ox-alpha   [current]) else (echo    1. stealth/ox-alpha)
+if "%current%"=="anthropic/claude-opus-4.8" (echo    2. anthropic/claude-opus-4.8   [current]) else (echo    2. anthropic/claude-opus-4.8)
+if "%current%"=="anthropic/claude-sonnet-5" (echo    3. anthropic/claude-sonnet-5   [current]) else (echo    3. anthropic/claude-sonnet-5)
+if "%current%"=="anthropic/claude-haiku-4.5" (echo    4. anthropic/claude-haiku-4.5   [current]) else (echo    4. anthropic/claude-haiku-4.5)
+if "%current%"=="x-ai/grok-4.20" (echo    5. x-ai/grok-4.20   [current]) else (echo    5. x-ai/grok-4.20)
+if "%current%"=="openai/gpt-5.6-sol" (echo    6. openai/gpt-5.6-sol   [current]) else (echo    6. openai/gpt-5.6-sol)
+if "%current%"=="google/gemini-3.1-pro-preview" (echo    7. google/gemini-3.1-pro-preview   [current]) else (echo    7. google/gemini-3.1-pro-preview)
+if "%current%"=="deepseek/deepseek-v4-pro" (echo    8. deepseek/deepseek-v4-pro   [current]) else (echo    8. deepseek/deepseek-v4-pro)
+if "%current%"=="moonshotai/kimi-k3" (echo    9. moonshotai/kimi-k3   [current]) else (echo    9. moonshotai/kimi-k3)
+if "%current%"=="z-ai/glm-5" (echo    10. z-ai/glm-5   [current]) else (echo    10. z-ai/glm-5)
+echo     0. type a different id by hand
+set /p pick=choice [1-10, 0]: 
+if "%pick%"=="1" set "chosen=stealth/ox-alpha"
+if "%pick%"=="2" set "chosen=anthropic/claude-opus-4.8"
+if "%pick%"=="3" set "chosen=anthropic/claude-sonnet-5"
+if "%pick%"=="4" set "chosen=anthropic/claude-haiku-4.5"
+if "%pick%"=="5" set "chosen=x-ai/grok-4.20"
+if "%pick%"=="6" set "chosen=openai/gpt-5.6-sol"
+if "%pick%"=="7" set "chosen=google/gemini-3.1-pro-preview"
+if "%pick%"=="8" set "chosen=deepseek/deepseek-v4-pro"
+if "%pick%"=="9" set "chosen=moonshotai/kimi-k3"
+if "%pick%"=="10" set "chosen=z-ai/glm-5"
+if "%pick%"=="0" set /p chosen=model id: 
+:save
+if "%chosen%"=="" (
+    echo ccor-model: nothing picked, %MODELFILE% left unchanged.
     exit /b 1
 )
->"%MODELFILE%" echo %id%
-echo ccor-model: model set to %id% (%MODELFILE%).
+>"%MODELFILE%" echo %chosen%
+echo ccor-model: model set to %chosen% (%MODELFILE%).
+echo echo More ids: https://openrouter.ai/models
+'@
+        $cmds['ccart'] = @'
+@echo off
+setlocal
+set "TOKENFILE=%USERPROFILE%\.agentrouter_token"
+set "MODELFILE=%USERPROFILE%\.agentrouter_model"
+set "token="
+if exist "%TOKENFILE%" set /p token=<"%TOKENFILE%"
+if not "%token%"=="" goto :run
+set /p token=ccart: no API key found. Enter your AgentRouter API key:
+if "%token%"=="" (
+    echo ccart: no key entered, aborting.
+    exit /b 1
+)
+>"%TOKENFILE%" echo %token%
+icacls "%TOKENFILE%" /inheritance:r /grant:r "%USERNAME%:(R,W)" >nul 2>&1
+echo ccart: key saved to %TOKENFILE% (current-user only).
+:run
+rem ---- Models: leave these EMPTY to follow ccart-model / the default below ---------
+rem AgentRouter serves a short list - claude-opus-5, claude-opus-4-8, gpt-5.6-sol,
+rem deepseek-v4f. Fill one in only to pin that tier here.
+set "AR_MODEL="
+set "AR_SONNET_MODEL="
+set "AR_HAIKU_MODEL="
+set "AR_FABLE_MODEL="
+set "AR_SUBAGENT_MODEL="
+set "AR_DEFAULT_MODEL=claude-opus-5"
+rem ---------------------------------------------------------------------------------
+rem Resolution order for the main model: pinned above -> .agentrouter_model -> default.
+if "%AR_MODEL%"=="" if exist "%MODELFILE%" set /p AR_MODEL=<"%MODELFILE%"
+if "%AR_MODEL%"=="" (
+    set "AR_MODEL=%AR_DEFAULT_MODEL%"
+    echo ccart: no model set, falling back to %AR_DEFAULT_MODEL% -- change it with: ccart-model your-model-id
+)
+if "%AR_SONNET_MODEL%"=="" set "AR_SONNET_MODEL=%AR_MODEL%"
+if "%AR_HAIKU_MODEL%"=="" set "AR_HAIKU_MODEL=%AR_MODEL%"
+if "%AR_FABLE_MODEL%"=="" set "AR_FABLE_MODEL=%AR_MODEL%"
+if "%AR_SUBAGENT_MODEL%"=="" set "AR_SUBAGENT_MODEL=%AR_MODEL%"
+set "ANTHROPIC_BASE_URL=https://agentrouter.org"
+set "ANTHROPIC_AUTH_TOKEN=%token%"
+rem ANTHROPIC_API_KEY is blanked so the gateway only ever sees the Bearer token:
+rem Claude Code sends ANTHROPIC_API_KEY as x-api-key, a direct-Anthropic credential.
+set "ANTHROPIC_API_KEY="
+set "ANTHROPIC_MODEL=%AR_MODEL%"
+set "ANTHROPIC_DEFAULT_OPUS_MODEL=%AR_MODEL%"
+set "ANTHROPIC_DEFAULT_SONNET_MODEL=%AR_SONNET_MODEL%"
+set "ANTHROPIC_DEFAULT_HAIKU_MODEL=%AR_HAIKU_MODEL%"
+set "ANTHROPIC_DEFAULT_FABLE_MODEL=%AR_FABLE_MODEL%"
+set "CLAUDE_CODE_SUBAGENT_MODEL=%AR_SUBAGENT_MODEL%"
+set "API_TIMEOUT_MS=3000000"
+call claude --dangerously-skip-permissions %*
+'@
+        $cmds['ccart-token'] = @'
+@echo off
+setlocal
+set "TOKENFILE=%USERPROFILE%\.agentrouter_token"
+set "key=%~1"
+if "%key%"=="" set /p key=ccart-token - paste API key:
+if "%key%"=="" (
+    echo ccart-token: no key given.
+    exit /b 1
+)
+>"%TOKENFILE%" echo %key%
+icacls "%TOKENFILE%" /inheritance:r /grant:r "%USERNAME%:(R,W)" >nul 2>&1
+echo ccart-token: key written to %TOKENFILE% (current-user only).
+'@
+        $cmds['ccart-model'] = @'
+@echo off
+setlocal
+set "MODELFILE=%USERPROFILE%\.agentrouter_model"
+set "chosen="
+if not "%~1"=="" set "chosen=%~1"
+if not "%chosen%"=="" goto :save
+set "current="
+if exist "%MODELFILE%" set /p current=<"%MODELFILE%"
+echo ccart-model - pick a model:
+if "%current%"=="claude-opus-5" (echo    1. claude-opus-5   [current]) else (echo    1. claude-opus-5)
+if "%current%"=="claude-opus-4-8" (echo    2. claude-opus-4-8   [current]) else (echo    2. claude-opus-4-8)
+if "%current%"=="gpt-5.6-sol" (echo    3. gpt-5.6-sol   [current]) else (echo    3. gpt-5.6-sol)
+if "%current%"=="deepseek-v4f" (echo    4. deepseek-v4f   [current]) else (echo    4. deepseek-v4f)
+echo     0. type a different id by hand
+set /p pick=choice [1-4, 0]: 
+if "%pick%"=="1" set "chosen=claude-opus-5"
+if "%pick%"=="2" set "chosen=claude-opus-4-8"
+if "%pick%"=="3" set "chosen=gpt-5.6-sol"
+if "%pick%"=="4" set "chosen=deepseek-v4f"
+if "%pick%"=="0" set /p chosen=model id: 
+:save
+if "%chosen%"=="" (
+    echo ccart-model: nothing picked, %MODELFILE% left unchanged.
+    exit /b 1
+)
+>"%MODELFILE%" echo %chosen%
+echo ccart-model: model set to %chosen% (%MODELFILE%).
 '@
 
         # Build the install set from the SELECTED aliases; auto-bundle the *-token setters.
@@ -2565,6 +2690,8 @@ echo ccor-model: model set to %id% (%MODELFILE%).
         if ($install['ccglm'])  { $install['ccglm-token']  = $true }   # ccglm  -> also ccglm-token
         if ($install['ccor'])   { $install['ccor-token']   = $true      # ccor   -> also ccor-token
                                   $install['ccor-model']   = $true }  #        -> and ccor-model
+        if ($install['ccart'])  { $install['ccart-token']  = $true      # ccart  -> also ccart-token
+                                  $install['ccart-model']  = $true }  #        -> and ccart-model
 
         # If any selected alias is already installed, ask once before overwriting them.
         $already = @($cmds.Keys | Where-Object { $install[$_] -and (Test-AliasInstalled $_) })
@@ -5636,7 +5763,7 @@ function Show-TweaksSubmenu {
         $mk = ''; if (Test-TweakApplied -Key $t.Key) { $mk = 'applied' }
         [void]$rows.Add(@{ Num = $n; Label = $t.Label; Desc = ''; Marker = $mk; Selected = ($script:SelectedTweaks -contains $t.Key); IsGroup = $false; OnEnter = $null; Kind = 'tweak'; Ref = $t })
     }
-    # CLI aliases - individually selectable here; cckimi/ccglm/ccor auto-add their -token setter.
+    # CLI aliases - individually selectable here; cckimi/ccglm/ccor/ccart auto-add their setters.
     foreach ($a in $script:CliAliases) {
         $n++
         $mk = if (Test-AliasInstalled $a.Key) { 'installed' } else { '' }
