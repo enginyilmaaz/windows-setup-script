@@ -4,7 +4,7 @@ A comprehensive, modular PowerShell script that automates Windows 10/11 post-ins
 
 The Windows-native counterpart of the [Ubuntu Post-Installation Setup Script](https://github.com/enginyilmaaz/ubuntu-setup-script).
 
-**Version:** 1.2.1
+**Version:** 1.2.2
 
 ## 🚀 Quick Start
 
@@ -222,6 +222,7 @@ Global `.cmd` commands installed into `%USERPROFILE%\apps\aliases\` (added to PA
 
 - `ccskip` / `cxskip` — Claude Code on your normal Anthropic login, skip-permissions (pinned to Opus 4.8 / Opus 5)
 - `cckimi` / `ccglm` — Claude Code on the Kimi / Z.AI-GLM backends (selecting one **auto-installs** its `cckimi-token` / `ccglm-token` key setter)
+- `ccor` — Claude Code on the **OpenRouter** gateway (also auto-installs `ccor-token`). It ships with **no model set**: open `%USERPROFILE%\apps\aliases\ccor.cmd` and fill in `OR_MODEL=` with an id from [openrouter.ai/models](https://openrouter.ai/models) — any tier you leave blank falls back to it.
 
 ## 💾 Backup & Restore
 

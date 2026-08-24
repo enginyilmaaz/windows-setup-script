@@ -25,7 +25,7 @@
 #===============================================================================
 
 $script:SCRIPT_VERSION  = '1.9.7'
-$script:SCRIPT_REVISION = '50'
+$script:SCRIPT_REVISION = '51'
 $script:SCRIPT_DATE     = '2026-08-19'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -732,12 +732,13 @@ function Enable-ServiceItem {
     } catch { Write-LogWarning "Could not re-enable $($Item.Svc): $($_.Exception.Message)"; return $false }
 }
 
-# CLI aliases (own submenu group). cckimi/ccglm auto-bundle their *-token setter.
+# CLI aliases (own submenu group). cckimi/ccglm/ccor auto-bundle their *-token setter.
 $script:CliAliases = @(
     @{ Key='ccskip'; Label='ccskip  (Claude skip-permissions, Opus 4.8)' }
     @{ Key='cxskip'; Label='cxskip  (Claude skip-permissions, Opus 5)' }
     @{ Key='cckimi'; Label='cckimi  (Claude Code on the Kimi backend)  [+ cckimi-token]' }
     @{ Key='ccglm';  Label='ccglm   (Claude Code on the Z.AI GLM backend)  [+ ccglm-token]' }
+    @{ Key='ccor';   Label='ccor    (Claude Code on OpenRouter, model left blank)  [+ ccor-token]' }
 )
 
 # VS Code extensions (VS Code submenu) - IDs mirror the source install_vscode_extensions
@@ -2359,8 +2360,8 @@ function Remove-AliasEverywhere {
     }
 }
 
-# CLI Aliases: install ccskip / cxskip / cckimi / ccglm (Claude/Codex helpers) plus
-# cckimi-token / ccglm-token as standalone .cmd commands under %USERPROFILE%\apps\aliases
+# CLI Aliases: install ccskip / cxskip / cckimi / ccglm / ccor (Claude/Codex helpers) plus
+# cckimi-token / ccglm-token / ccor-token as standalone .cmd commands under %USERPROFILE%\apps\aliases
 # and add that folder to PATH, so they work from ANY shell (cmd, PowerShell, Run). Pure
 # batch, one self-contained .cmd each - no .ps1. Env vars are scoped via setlocal to that
 # cmd process, so they don't leak into the caller. Mirrors setup_cli_shortcuts.
@@ -2447,6 +2448,58 @@ set "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
 set "API_TIMEOUT_MS=3000000"
 call claude --dangerously-skip-permissions %*
 '@
+        $cmds['ccor'] = @'
+@echo off
+setlocal
+set "TOKENFILE=%USERPROFILE%\.openrouter_token"
+set "token="
+if exist "%TOKENFILE%" set /p token=<"%TOKENFILE%"
+if not "%token%"=="" goto :run
+set /p token=ccor: no API key found. Enter your OpenRouter API key:
+if "%token%"=="" (
+    echo ccor: no key entered, aborting.
+    exit /b 1
+)
+>"%TOKENFILE%" echo %token%
+icacls "%TOKENFILE%" /inheritance:r /grant:r "%USERNAME%:(R,W)" >nul 2>&1
+echo ccor: key saved to %TOKENFILE% (current-user only).
+:run
+rem ---- OpenRouter models: intentionally LEFT EMPTY -- fill them in yourself -------
+rem Model ids come from https://openrouter.ai/models, e.g. anthropic/claude-opus-4.5
+rem or the tilde "latest" form ~anthropic/claude-opus-latest. Only OR_MODEL is
+rem required; every tier left blank falls back to it.
+set "OR_MODEL="
+set "OR_SONNET_MODEL="
+set "OR_HAIKU_MODEL="
+set "OR_FABLE_MODEL="
+set "OR_SUBAGENT_MODEL="
+rem --------------------------------------------------------------------------------
+if "%OR_MODEL%"=="" (
+    echo ccor: no model set yet. Edit "%USERPROFILE%\apps\aliases\ccor.cmd" and fill in
+    echo       OR_MODEL= with an OpenRouter model id -- pick one at
+    echo       https://openrouter.ai/models
+    exit /b 1
+)
+if "%OR_SONNET_MODEL%"=="" set "OR_SONNET_MODEL=%OR_MODEL%"
+if "%OR_HAIKU_MODEL%"=="" set "OR_HAIKU_MODEL=%OR_MODEL%"
+if "%OR_FABLE_MODEL%"=="" set "OR_FABLE_MODEL=%OR_MODEL%"
+if "%OR_SUBAGENT_MODEL%"=="" set "OR_SUBAGENT_MODEL=%OR_MODEL%"
+set "ANTHROPIC_BASE_URL=https://openrouter.ai/api"
+set "ANTHROPIC_AUTH_TOKEN=%token%"
+rem ANTHROPIC_API_KEY must stay empty: Claude Code would send it as x-api-key, which
+rem OpenRouter treats as a direct-Anthropic credential and the request fails to auth.
+set "ANTHROPIC_API_KEY="
+set "ANTHROPIC_MODEL=%OR_MODEL%"
+set "ANTHROPIC_DEFAULT_OPUS_MODEL=%OR_MODEL%"
+set "ANTHROPIC_DEFAULT_SONNET_MODEL=%OR_SONNET_MODEL%"
+set "ANTHROPIC_DEFAULT_HAIKU_MODEL=%OR_HAIKU_MODEL%"
+set "ANTHROPIC_DEFAULT_FABLE_MODEL=%OR_FABLE_MODEL%"
+set "CLAUDE_CODE_SUBAGENT_MODEL=%OR_SUBAGENT_MODEL%"
+set "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1"
+set "CLAUDE_CODE_SKIP_FAST_MODE_ORG_CHECK=1"
+set "API_TIMEOUT_MS=3000000"
+call claude --dangerously-skip-permissions %*
+'@
         $cmds['cckimi-token'] = @'
 @echo off
 setlocal
@@ -2475,6 +2528,20 @@ if "%key%"=="" (
 icacls "%TOKENFILE%" /inheritance:r /grant:r "%USERNAME%:(R,W)" >nul 2>&1
 echo ccglm-token: key written to %TOKENFILE% (current-user only).
 '@
+        $cmds['ccor-token'] = @'
+@echo off
+setlocal
+set "TOKENFILE=%USERPROFILE%\.openrouter_token"
+set "key=%~1"
+if "%key%"=="" set /p key=ccor-token - paste API key:
+if "%key%"=="" (
+    echo ccor-token: no key given.
+    exit /b 1
+)
+>"%TOKENFILE%" echo %key%
+icacls "%TOKENFILE%" /inheritance:r /grant:r "%USERNAME%:(R,W)" >nul 2>&1
+echo ccor-token: key written to %TOKENFILE% (current-user only).
+'@
 
         # Build the install set from the SELECTED aliases; auto-bundle the *-token setters.
         $sel = @($script:SelectedAliases)
@@ -2482,6 +2549,7 @@ echo ccglm-token: key written to %TOKENFILE% (current-user only).
         foreach ($k in $sel) { if ($cmds.Contains($k)) { $install[$k] = $true } }
         if ($install['cckimi']) { $install['cckimi-token'] = $true }   # cckimi -> also cckimi-token
         if ($install['ccglm'])  { $install['ccglm-token']  = $true }   # ccglm  -> also ccglm-token
+        if ($install['ccor'])   { $install['ccor-token']   = $true }   # ccor   -> also ccor-token
 
         # If any selected alias is already installed, ask once before overwriting them.
         $already = @($cmds.Keys | Where-Object { $install[$_] -and (Test-AliasInstalled $_) })
@@ -5553,7 +5621,7 @@ function Show-TweaksSubmenu {
         $mk = ''; if (Test-TweakApplied -Key $t.Key) { $mk = 'applied' }
         [void]$rows.Add(@{ Num = $n; Label = $t.Label; Desc = ''; Marker = $mk; Selected = ($script:SelectedTweaks -contains $t.Key); IsGroup = $false; OnEnter = $null; Kind = 'tweak'; Ref = $t })
     }
-    # CLI aliases - individually selectable here; cckimi/ccglm auto-add their -token setter.
+    # CLI aliases - individually selectable here; cckimi/ccglm/ccor auto-add their -token setter.
     foreach ($a in $script:CliAliases) {
         $n++
         $mk = if (Test-AliasInstalled $a.Key) { 'installed' } else { '' }
