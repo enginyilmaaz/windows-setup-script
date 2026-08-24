@@ -25,7 +25,7 @@
 #===============================================================================
 
 $script:SCRIPT_VERSION  = '1.9.7'
-$script:SCRIPT_REVISION = '51'
+$script:SCRIPT_REVISION = '52'
 $script:SCRIPT_DATE     = '2026-08-19'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -738,7 +738,7 @@ $script:CliAliases = @(
     @{ Key='cxskip'; Label='cxskip  (Claude skip-permissions, Opus 5)' }
     @{ Key='cckimi'; Label='cckimi  (Claude Code on the Kimi backend)  [+ cckimi-token]' }
     @{ Key='ccglm';  Label='ccglm   (Claude Code on the Z.AI GLM backend)  [+ ccglm-token]' }
-    @{ Key='ccor';   Label='ccor    (Claude Code on OpenRouter, model left blank)  [+ ccor-token]' }
+    @{ Key='ccor';   Label='ccor    (Claude Code on OpenRouter, stealth/ox-alpha)  [+ ccor-token, ccor-model]' }
 )
 
 # VS Code extensions (VS Code submenu) - IDs mirror the source install_vscode_extensions
@@ -2361,7 +2361,7 @@ function Remove-AliasEverywhere {
 }
 
 # CLI Aliases: install ccskip / cxskip / cckimi / ccglm / ccor (Claude/Codex helpers) plus
-# cckimi-token / ccglm-token / ccor-token as standalone .cmd commands under %USERPROFILE%\apps\aliases
+# cckimi-token / ccglm-token / ccor-token / ccor-model as standalone .cmd commands under %USERPROFILE%\apps\aliases
 # and add that folder to PATH, so they work from ANY shell (cmd, PowerShell, Run). Pure
 # batch, one self-contained .cmd each - no .ps1. Env vars are scoped via setlocal to that
 # cmd process, so they don't leak into the caller. Mirrors setup_cli_shortcuts.
@@ -2452,6 +2452,7 @@ call claude --dangerously-skip-permissions %*
 @echo off
 setlocal
 set "TOKENFILE=%USERPROFILE%\.openrouter_token"
+set "MODELFILE=%USERPROFILE%\.openrouter_model"
 set "token="
 if exist "%TOKENFILE%" set /p token=<"%TOKENFILE%"
 if not "%token%"=="" goto :run
@@ -2464,21 +2465,21 @@ if "%token%"=="" (
 icacls "%TOKENFILE%" /inheritance:r /grant:r "%USERNAME%:(R,W)" >nul 2>&1
 echo ccor: key saved to %TOKENFILE% (current-user only).
 :run
-rem ---- OpenRouter models: intentionally LEFT EMPTY -- fill them in yourself -------
-rem Model ids come from https://openrouter.ai/models, e.g. anthropic/claude-opus-4.5
-rem or the tilde "latest" form ~anthropic/claude-opus-latest. Only OR_MODEL is
-rem required; every tier left blank falls back to it.
+rem ---- Models: leave these EMPTY to follow ccor-model / the default below ----------
+rem Fill one in only to pin that tier here, e.g. set "OR_HAIKU_MODEL=z-ai/glm-4.7-flash".
+rem Model ids come from https://openrouter.ai/models
 set "OR_MODEL="
 set "OR_SONNET_MODEL="
 set "OR_HAIKU_MODEL="
 set "OR_FABLE_MODEL="
 set "OR_SUBAGENT_MODEL="
-rem --------------------------------------------------------------------------------
+set "OR_DEFAULT_MODEL=stealth/ox-alpha"
+rem ---------------------------------------------------------------------------------
+rem Resolution order for the main model: pinned above -> .openrouter_model -> default.
+if "%OR_MODEL%"=="" if exist "%MODELFILE%" set /p OR_MODEL=<"%MODELFILE%"
 if "%OR_MODEL%"=="" (
-    echo ccor: no model set yet. Edit "%USERPROFILE%\apps\aliases\ccor.cmd" and fill in
-    echo       OR_MODEL= with an OpenRouter model id -- pick one at
-    echo       https://openrouter.ai/models
-    exit /b 1
+    set "OR_MODEL=%OR_DEFAULT_MODEL%"
+    echo ccor: no model set, falling back to %OR_DEFAULT_MODEL% -- change it with: ccor-model your/model-id
 )
 if "%OR_SONNET_MODEL%"=="" set "OR_SONNET_MODEL=%OR_MODEL%"
 if "%OR_HAIKU_MODEL%"=="" set "OR_HAIKU_MODEL=%OR_MODEL%"
@@ -2542,6 +2543,19 @@ if "%key%"=="" (
 icacls "%TOKENFILE%" /inheritance:r /grant:r "%USERNAME%:(R,W)" >nul 2>&1
 echo ccor-token: key written to %TOKENFILE% (current-user only).
 '@
+        $cmds['ccor-model'] = @'
+@echo off
+setlocal
+set "MODELFILE=%USERPROFILE%\.openrouter_model"
+set "id=%~1"
+if "%id%"=="" set /p id=ccor-model - paste an OpenRouter model id, browse https://openrouter.ai/models :
+if "%id%"=="" (
+    echo ccor-model: no id given.
+    exit /b 1
+)
+>"%MODELFILE%" echo %id%
+echo ccor-model: model set to %id% (%MODELFILE%).
+'@
 
         # Build the install set from the SELECTED aliases; auto-bundle the *-token setters.
         $sel = @($script:SelectedAliases)
@@ -2549,7 +2563,8 @@ echo ccor-token: key written to %TOKENFILE% (current-user only).
         foreach ($k in $sel) { if ($cmds.Contains($k)) { $install[$k] = $true } }
         if ($install['cckimi']) { $install['cckimi-token'] = $true }   # cckimi -> also cckimi-token
         if ($install['ccglm'])  { $install['ccglm-token']  = $true }   # ccglm  -> also ccglm-token
-        if ($install['ccor'])   { $install['ccor-token']   = $true }   # ccor   -> also ccor-token
+        if ($install['ccor'])   { $install['ccor-token']   = $true      # ccor   -> also ccor-token
+                                  $install['ccor-model']   = $true }  #        -> and ccor-model
 
         # If any selected alias is already installed, ask once before overwriting them.
         $already = @($cmds.Keys | Where-Object { $install[$_] -and (Test-AliasInstalled $_) })
