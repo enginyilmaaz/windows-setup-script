@@ -25,7 +25,7 @@
 #===============================================================================
 
 $script:SCRIPT_VERSION  = '1.9.7'
-$script:SCRIPT_REVISION = '53'
+$script:SCRIPT_REVISION = '54'
 $script:SCRIPT_DATE     = '2026-08-19'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -732,14 +732,14 @@ function Enable-ServiceItem {
     } catch { Write-LogWarning "Could not re-enable $($Item.Svc): $($_.Exception.Message)"; return $false }
 }
 
-# CLI aliases (own submenu group). cckimi/ccglm/ccor/ccart auto-bundle their *-token setter
+# CLI aliases (own submenu group). cckimi/ccglm/ccort/ccart auto-bundle their *-token setter
 # (and, for the gateways, their *-model picker).
 $script:CliAliases = @(
     @{ Key='ccskip'; Label='ccskip  (Claude skip-permissions, Opus 4.8)' }
     @{ Key='cxskip'; Label='cxskip  (Claude skip-permissions, Opus 5)' }
     @{ Key='cckimi'; Label='cckimi  (Claude Code on the Kimi backend)  [+ cckimi-token]' }
     @{ Key='ccglm';  Label='ccglm   (Claude Code on the Z.AI GLM backend)  [+ ccglm-token]' }
-    @{ Key='ccor';   Label='ccor    (Claude Code on OpenRouter, stealth/ox-alpha)  [+ ccor-token, ccor-model]' }
+    @{ Key='ccort';   Label='ccort    (Claude Code on OpenRouter, stealth/ox-alpha)  [+ ccort-token, ccort-model]' }
     @{ Key='ccart';  Label='ccart   (Claude Code on AgentRouter, claude-opus-5)  [+ ccart-token, ccart-model]' }
 )
 
@@ -2362,7 +2362,7 @@ function Remove-AliasEverywhere {
     }
 }
 
-# CLI Aliases: install ccskip / cxskip / cckimi / ccglm / ccor / ccart (Claude/Codex helpers) plus
+# CLI Aliases: install ccskip / cxskip / cckimi / ccglm / ccort / ccart (Claude/Codex helpers) plus
 # their *-token / *-model setters as standalone .cmd commands under %USERPROFILE%\apps\aliases
 # and add that folder to PATH, so they work from ANY shell (cmd, PowerShell, Run). Pure
 # batch, one self-contained .cmd each - no .ps1. Env vars are scoped via setlocal to that
@@ -2450,7 +2450,7 @@ set "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
 set "API_TIMEOUT_MS=3000000"
 call claude --dangerously-skip-permissions %*
 '@
-        $cmds['ccor'] = @'
+        $cmds['ccort'] = @'
 @echo off
 setlocal
 set "TOKENFILE=%USERPROFILE%\.openrouter_token"
@@ -2458,16 +2458,16 @@ set "MODELFILE=%USERPROFILE%\.openrouter_model"
 set "token="
 if exist "%TOKENFILE%" set /p token=<"%TOKENFILE%"
 if not "%token%"=="" goto :run
-set /p token=ccor: no API key found. Enter your OpenRouter API key:
+set /p token=ccort: no API key found. Enter your OpenRouter API key:
 if "%token%"=="" (
-    echo ccor: no key entered, aborting.
+    echo ccort: no key entered, aborting.
     exit /b 1
 )
 >"%TOKENFILE%" echo %token%
 icacls "%TOKENFILE%" /inheritance:r /grant:r "%USERNAME%:(R,W)" >nul 2>&1
-echo ccor: key saved to %TOKENFILE% (current-user only).
+echo ccort: key saved to %TOKENFILE% (current-user only).
 :run
-rem ---- Models: leave these EMPTY to follow ccor-model / the default below ----------
+rem ---- Models: leave these EMPTY to follow ccort-model / the default below ----------
 rem Fill one in only to pin that tier here, e.g. set "OR_HAIKU_MODEL=z-ai/glm-4.7-flash".
 rem Model ids come from https://openrouter.ai/models
 set "OR_MODEL="
@@ -2481,7 +2481,7 @@ rem Resolution order for the main model: pinned above -> .openrouter_model -> de
 if "%OR_MODEL%"=="" if exist "%MODELFILE%" set /p OR_MODEL=<"%MODELFILE%"
 if "%OR_MODEL%"=="" (
     set "OR_MODEL=%OR_DEFAULT_MODEL%"
-    echo ccor: no model set, falling back to %OR_DEFAULT_MODEL% -- change it with: ccor-model your/model-id
+    echo ccort: no model set, falling back to %OR_DEFAULT_MODEL% -- change it with: ccort-model your/model-id
 )
 if "%OR_SONNET_MODEL%"=="" set "OR_SONNET_MODEL=%OR_MODEL%"
 if "%OR_HAIKU_MODEL%"=="" set "OR_HAIKU_MODEL=%OR_MODEL%"
@@ -2531,21 +2531,21 @@ if "%key%"=="" (
 icacls "%TOKENFILE%" /inheritance:r /grant:r "%USERNAME%:(R,W)" >nul 2>&1
 echo ccglm-token: key written to %TOKENFILE% (current-user only).
 '@
-        $cmds['ccor-token'] = @'
+        $cmds['ccort-token'] = @'
 @echo off
 setlocal
 set "TOKENFILE=%USERPROFILE%\.openrouter_token"
 set "key=%~1"
-if "%key%"=="" set /p key=ccor-token - paste API key:
+if "%key%"=="" set /p key=ccort-token - paste API key:
 if "%key%"=="" (
-    echo ccor-token: no key given.
+    echo ccort-token: no key given.
     exit /b 1
 )
 >"%TOKENFILE%" echo %key%
 icacls "%TOKENFILE%" /inheritance:r /grant:r "%USERNAME%:(R,W)" >nul 2>&1
-echo ccor-token: key written to %TOKENFILE% (current-user only).
+echo ccort-token: key written to %TOKENFILE% (current-user only).
 '@
-        $cmds['ccor-model'] = @'
+        $cmds['ccort-model'] = @'
 @echo off
 setlocal
 set "MODELFILE=%USERPROFILE%\.openrouter_model"
@@ -2554,7 +2554,7 @@ if not "%~1"=="" set "chosen=%~1"
 if not "%chosen%"=="" goto :save
 set "current="
 if exist "%MODELFILE%" set /p current=<"%MODELFILE%"
-echo ccor-model - pick a model:
+echo ccort-model - pick a model:
 if "%current%"=="stealth/ox-alpha" (echo    1. stealth/ox-alpha   [current]) else (echo    1. stealth/ox-alpha)
 if "%current%"=="anthropic/claude-opus-4.8" (echo    2. anthropic/claude-opus-4.8   [current]) else (echo    2. anthropic/claude-opus-4.8)
 if "%current%"=="anthropic/claude-sonnet-5" (echo    3. anthropic/claude-sonnet-5   [current]) else (echo    3. anthropic/claude-sonnet-5)
@@ -2580,11 +2580,11 @@ if "%pick%"=="10" set "chosen=z-ai/glm-5"
 if "%pick%"=="0" set /p chosen=model id: 
 :save
 if "%chosen%"=="" (
-    echo ccor-model: nothing picked, %MODELFILE% left unchanged.
+    echo ccort-model: nothing picked, %MODELFILE% left unchanged.
     exit /b 1
 )
 >"%MODELFILE%" echo %chosen%
-echo ccor-model: model set to %chosen% (%MODELFILE%).
+echo ccort-model: model set to %chosen% (%MODELFILE%).
 echo echo More ids: https://openrouter.ai/models
 '@
         $cmds['ccart'] = @'
@@ -2688,8 +2688,8 @@ echo ccart-model: model set to %chosen% (%MODELFILE%).
         foreach ($k in $sel) { if ($cmds.Contains($k)) { $install[$k] = $true } }
         if ($install['cckimi']) { $install['cckimi-token'] = $true }   # cckimi -> also cckimi-token
         if ($install['ccglm'])  { $install['ccglm-token']  = $true }   # ccglm  -> also ccglm-token
-        if ($install['ccor'])   { $install['ccor-token']   = $true      # ccor   -> also ccor-token
-                                  $install['ccor-model']   = $true }  #        -> and ccor-model
+        if ($install['ccort'])   { $install['ccort-token']   = $true      # ccort   -> also ccort-token
+                                  $install['ccort-model']   = $true }  #        -> and ccort-model
         if ($install['ccart'])  { $install['ccart-token']  = $true      # ccart  -> also ccart-token
                                   $install['ccart-model']  = $true }  #        -> and ccart-model
 
@@ -2705,7 +2705,8 @@ echo ccart-model: model set to %chosen% (%MODELFILE%).
         }
 
         # Remove discontinued aliases everywhere (all PATH dirs incl. ~/.local/bin + session).
-        foreach ($n in @('claude-skip', 'codex-skip')) { Remove-AliasEverywhere $n }
+        # ccor* is the pre-rename name of the ccort family; both are swept unconditionally.
+        foreach ($n in @('claude-skip', 'codex-skip', 'ccor', 'ccor-token', 'ccor-model')) { Remove-AliasEverywhere $n }
         # Install-action model: only the SELECTED aliases are (re)installed. Non-selected ones
         # are left untouched (checking installs; the marker just shows what's already installed).
         foreach ($name in $cmds.Keys) {
@@ -5763,7 +5764,7 @@ function Show-TweaksSubmenu {
         $mk = ''; if (Test-TweakApplied -Key $t.Key) { $mk = 'applied' }
         [void]$rows.Add(@{ Num = $n; Label = $t.Label; Desc = ''; Marker = $mk; Selected = ($script:SelectedTweaks -contains $t.Key); IsGroup = $false; OnEnter = $null; Kind = 'tweak'; Ref = $t })
     }
-    # CLI aliases - individually selectable here; cckimi/ccglm/ccor/ccart auto-add their setters.
+    # CLI aliases - individually selectable here; cckimi/ccglm/ccort/ccart auto-add their setters.
     foreach ($a in $script:CliAliases) {
         $n++
         $mk = if (Test-AliasInstalled $a.Key) { 'installed' } else { '' }

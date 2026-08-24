@@ -4,7 +4,7 @@ A comprehensive, modular PowerShell script that automates Windows 10/11 post-ins
 
 The Windows-native counterpart of the [Ubuntu Post-Installation Setup Script](https://github.com/enginyilmaaz/ubuntu-setup-script).
 
-**Version:** 1.2.4
+**Version:** 1.2.5
 
 ## 🚀 Quick Start
 
@@ -222,7 +222,7 @@ Global `.cmd` commands installed into `%USERPROFILE%\apps\aliases\` (added to PA
 
 - `ccskip` / `cxskip` — Claude Code on your normal Anthropic login, skip-permissions (pinned to Opus 4.8 / Opus 5)
 - `cckimi` / `ccglm` — Claude Code on the Kimi / Z.AI-GLM backends (selecting one **auto-installs** its `cckimi-token` / `ccglm-token` key setter)
-- `ccor` — Claude Code on the **OpenRouter** gateway (also auto-installs `ccor-token` and `ccor-model`). Defaults to the free `stealth/ox-alpha` (1M ctx, built for coding); run `ccor-model` for a numbered picker, or pass any id from [openrouter.ai/models](https://openrouter.ai/models) — the choice is cached in `%USERPROFILE%\.openrouter_model`.
+- `ccort` — Claude Code on the **OpenRouter** gateway (also auto-installs `ccort-token` and `ccort-model`). Defaults to the free `stealth/ox-alpha` (1M ctx, built for coding); run `ccort-model` for a numbered picker, or pass any id from [openrouter.ai/models](https://openrouter.ai/models) — the choice is cached in `%USERPROFILE%\.openrouter_model`.
 - `ccart` — Claude Code on the **[AgentRouter](https://agentrouter.org)** gateway (also auto-installs `ccart-token` and `ccart-model`). Defaults to `claude-opus-5`; run `ccart-model` to pick from its catalogue (`claude-opus-5`, `claude-opus-4-8`, `gpt-5.6-sol`, `deepseek-v4f`), cached in `%USERPROFILE%\.agentrouter_model`.
 
 ## 💾 Backup & Restore
