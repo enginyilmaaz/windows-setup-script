@@ -25,7 +25,7 @@
 #===============================================================================
 
 $script:SCRIPT_VERSION  = '1.9.7'
-$script:SCRIPT_REVISION = '54'
+$script:SCRIPT_REVISION = '55'
 $script:SCRIPT_DATE     = '2026-08-19'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -2469,19 +2469,23 @@ echo ccort: key saved to %TOKENFILE% (current-user only).
 :run
 rem ---- Models: leave these EMPTY to follow ccort-model / the default below ----------
 rem Fill one in only to pin that tier here, e.g. set "OR_HAIKU_MODEL=z-ai/glm-4.7-flash".
-rem Model ids come from https://openrouter.ai/models
+rem Model ids come from https://openrouter.ai/models. Append [1m] to an id whose
+rem context window is 1M - without it Claude Code assumes 200k and compacts early.
 set "OR_MODEL="
 set "OR_SONNET_MODEL="
 set "OR_HAIKU_MODEL="
 set "OR_FABLE_MODEL="
 set "OR_SUBAGENT_MODEL="
-set "OR_DEFAULT_MODEL=stealth/ox-alpha"
+set "OR_DEFAULT_MODEL=stealth/ox-alpha[1m]"
 rem ---------------------------------------------------------------------------------
 rem Resolution order for the main model: pinned above -> .openrouter_model -> default.
 if "%OR_MODEL%"=="" if exist "%MODELFILE%" set /p OR_MODEL=<"%MODELFILE%"
 if "%OR_MODEL%"=="" (
+    rem Adopt the default once and record it, so this notice shows on the FIRST run only.
     set "OR_MODEL=%OR_DEFAULT_MODEL%"
-    echo ccort: no model set, falling back to %OR_DEFAULT_MODEL% -- change it with: ccort-model your/model-id
+    >"%MODELFILE%" echo %OR_DEFAULT_MODEL%
+    echo ccort: no model set -- adopting the default %OR_DEFAULT_MODEL%, saved to %MODELFILE%.
+    echo        pick another any time with: ccort-model
 )
 if "%OR_SONNET_MODEL%"=="" set "OR_SONNET_MODEL=%OR_MODEL%"
 if "%OR_HAIKU_MODEL%"=="" set "OR_HAIKU_MODEL=%OR_MODEL%"
@@ -2555,27 +2559,27 @@ if not "%chosen%"=="" goto :save
 set "current="
 if exist "%MODELFILE%" set /p current=<"%MODELFILE%"
 echo ccort-model - pick a model:
-if "%current%"=="stealth/ox-alpha" (echo    1. stealth/ox-alpha   [current]) else (echo    1. stealth/ox-alpha)
-if "%current%"=="anthropic/claude-opus-4.8" (echo    2. anthropic/claude-opus-4.8   [current]) else (echo    2. anthropic/claude-opus-4.8)
-if "%current%"=="anthropic/claude-sonnet-5" (echo    3. anthropic/claude-sonnet-5   [current]) else (echo    3. anthropic/claude-sonnet-5)
+if "%current%"=="stealth/ox-alpha[1m]" (echo    1. stealth/ox-alpha[1m]   [current]) else (echo    1. stealth/ox-alpha[1m])
+if "%current%"=="anthropic/claude-opus-4.8[1m]" (echo    2. anthropic/claude-opus-4.8[1m]   [current]) else (echo    2. anthropic/claude-opus-4.8[1m])
+if "%current%"=="anthropic/claude-sonnet-5[1m]" (echo    3. anthropic/claude-sonnet-5[1m]   [current]) else (echo    3. anthropic/claude-sonnet-5[1m])
 if "%current%"=="anthropic/claude-haiku-4.5" (echo    4. anthropic/claude-haiku-4.5   [current]) else (echo    4. anthropic/claude-haiku-4.5)
-if "%current%"=="x-ai/grok-4.20" (echo    5. x-ai/grok-4.20   [current]) else (echo    5. x-ai/grok-4.20)
-if "%current%"=="openai/gpt-5.6-sol" (echo    6. openai/gpt-5.6-sol   [current]) else (echo    6. openai/gpt-5.6-sol)
-if "%current%"=="google/gemini-3.1-pro-preview" (echo    7. google/gemini-3.1-pro-preview   [current]) else (echo    7. google/gemini-3.1-pro-preview)
-if "%current%"=="deepseek/deepseek-v4-pro" (echo    8. deepseek/deepseek-v4-pro   [current]) else (echo    8. deepseek/deepseek-v4-pro)
-if "%current%"=="moonshotai/kimi-k3" (echo    9. moonshotai/kimi-k3   [current]) else (echo    9. moonshotai/kimi-k3)
+if "%current%"=="x-ai/grok-4.20[1m]" (echo    5. x-ai/grok-4.20[1m]   [current]) else (echo    5. x-ai/grok-4.20[1m])
+if "%current%"=="openai/gpt-5.6-sol[1m]" (echo    6. openai/gpt-5.6-sol[1m]   [current]) else (echo    6. openai/gpt-5.6-sol[1m])
+if "%current%"=="google/gemini-3.1-pro-preview[1m]" (echo    7. google/gemini-3.1-pro-preview[1m]   [current]) else (echo    7. google/gemini-3.1-pro-preview[1m])
+if "%current%"=="deepseek/deepseek-v4-pro[1m]" (echo    8. deepseek/deepseek-v4-pro[1m]   [current]) else (echo    8. deepseek/deepseek-v4-pro[1m])
+if "%current%"=="moonshotai/kimi-k3[1m]" (echo    9. moonshotai/kimi-k3[1m]   [current]) else (echo    9. moonshotai/kimi-k3[1m])
 if "%current%"=="z-ai/glm-5" (echo    10. z-ai/glm-5   [current]) else (echo    10. z-ai/glm-5)
 echo     0. type a different id by hand
 set /p pick=choice [1-10, 0]: 
-if "%pick%"=="1" set "chosen=stealth/ox-alpha"
-if "%pick%"=="2" set "chosen=anthropic/claude-opus-4.8"
-if "%pick%"=="3" set "chosen=anthropic/claude-sonnet-5"
+if "%pick%"=="1" set "chosen=stealth/ox-alpha[1m]"
+if "%pick%"=="2" set "chosen=anthropic/claude-opus-4.8[1m]"
+if "%pick%"=="3" set "chosen=anthropic/claude-sonnet-5[1m]"
 if "%pick%"=="4" set "chosen=anthropic/claude-haiku-4.5"
-if "%pick%"=="5" set "chosen=x-ai/grok-4.20"
-if "%pick%"=="6" set "chosen=openai/gpt-5.6-sol"
-if "%pick%"=="7" set "chosen=google/gemini-3.1-pro-preview"
-if "%pick%"=="8" set "chosen=deepseek/deepseek-v4-pro"
-if "%pick%"=="9" set "chosen=moonshotai/kimi-k3"
+if "%pick%"=="5" set "chosen=x-ai/grok-4.20[1m]"
+if "%pick%"=="6" set "chosen=openai/gpt-5.6-sol[1m]"
+if "%pick%"=="7" set "chosen=google/gemini-3.1-pro-preview[1m]"
+if "%pick%"=="8" set "chosen=deepseek/deepseek-v4-pro[1m]"
+if "%pick%"=="9" set "chosen=moonshotai/kimi-k3[1m]"
 if "%pick%"=="10" set "chosen=z-ai/glm-5"
 if "%pick%"=="0" set /p chosen=model id: 
 :save
@@ -2617,8 +2621,11 @@ rem ----------------------------------------------------------------------------
 rem Resolution order for the main model: pinned above -> .agentrouter_model -> default.
 if "%AR_MODEL%"=="" if exist "%MODELFILE%" set /p AR_MODEL=<"%MODELFILE%"
 if "%AR_MODEL%"=="" (
+    rem Adopt the default once and record it, so this notice shows on the FIRST run only.
     set "AR_MODEL=%AR_DEFAULT_MODEL%"
-    echo ccart: no model set, falling back to %AR_DEFAULT_MODEL% -- change it with: ccart-model your-model-id
+    >"%MODELFILE%" echo %AR_DEFAULT_MODEL%
+    echo ccart: no model set -- adopting the default %AR_DEFAULT_MODEL%, saved to %MODELFILE%.
+    echo        pick another any time with: ccart-model
 )
 if "%AR_SONNET_MODEL%"=="" set "AR_SONNET_MODEL=%AR_MODEL%"
 if "%AR_HAIKU_MODEL%"=="" set "AR_HAIKU_MODEL=%AR_MODEL%"
@@ -2664,14 +2671,14 @@ if exist "%MODELFILE%" set /p current=<"%MODELFILE%"
 echo ccart-model - pick a model:
 if "%current%"=="claude-opus-5" (echo    1. claude-opus-5   [current]) else (echo    1. claude-opus-5)
 if "%current%"=="claude-opus-4-8" (echo    2. claude-opus-4-8   [current]) else (echo    2. claude-opus-4-8)
-if "%current%"=="gpt-5.6-sol" (echo    3. gpt-5.6-sol   [current]) else (echo    3. gpt-5.6-sol)
-if "%current%"=="deepseek-v4f" (echo    4. deepseek-v4f   [current]) else (echo    4. deepseek-v4f)
+if "%current%"=="gpt-5.6-sol[1m]" (echo    3. gpt-5.6-sol[1m]   [current]) else (echo    3. gpt-5.6-sol[1m])
+if "%current%"=="deepseek-v4f[1m]" (echo    4. deepseek-v4f[1m]   [current]) else (echo    4. deepseek-v4f[1m])
 echo     0. type a different id by hand
 set /p pick=choice [1-4, 0]: 
 if "%pick%"=="1" set "chosen=claude-opus-5"
 if "%pick%"=="2" set "chosen=claude-opus-4-8"
-if "%pick%"=="3" set "chosen=gpt-5.6-sol"
-if "%pick%"=="4" set "chosen=deepseek-v4f"
+if "%pick%"=="3" set "chosen=gpt-5.6-sol[1m]"
+if "%pick%"=="4" set "chosen=deepseek-v4f[1m]"
 if "%pick%"=="0" set /p chosen=model id: 
 :save
 if "%chosen%"=="" (

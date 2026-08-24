@@ -4,7 +4,7 @@ A comprehensive, modular PowerShell script that automates Windows 10/11 post-ins
 
 The Windows-native counterpart of the [Ubuntu Post-Installation Setup Script](https://github.com/enginyilmaaz/ubuntu-setup-script).
 
-**Version:** 1.2.5
+**Version:** 1.2.6
 
 ## 🚀 Quick Start
 
