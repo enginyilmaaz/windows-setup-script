@@ -167,7 +167,7 @@ Every entry is a **two-way toggle**. In the submenu, **SPACE** cycles each row `
 | Action Center | Disable the notification centre (policy) | Re-enable |
 | Lock screen | Disable for all users (policy) | Re-enable |
 | Search box | Disable web suggestions | Re-enable |
-| Search web results | Turn off Bing/web + Store/cloud results in Start search (local search stays) | Re-enable |
+| Search web results | Turn off Bing/web **and Store-app** results in Start search — kills the "get it from the Microsoft Store" app rows too; local search stays | Re-enable |
 | NumLock | On at the logon screen **and** after sign-in | Off |
 | Superfetch / Prefetch | Stop + disable `SysMain`, `EnablePrefetcher=0`, clear the Prefetch cache | Re-enable (`start=auto`, `EnablePrefetcher=3`) |
 | Windows Photo Viewer | Re-register it for `.tif .tiff .png .bmp .jpeg .jpg .ico` | Unregister |

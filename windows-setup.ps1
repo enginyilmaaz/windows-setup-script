@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.9.7'
-$script:SCRIPT_REVISION = '55'
+$script:SCRIPT_VERSION  = '1.9.8'
+$script:SCRIPT_REVISION = '56'
 $script:SCRIPT_DATE     = '2026-08-19'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -631,7 +631,7 @@ $script:UiTweaks = @(
     @{ Key='action-center';      Label='Disable Action Center / notifications';        Apply='Disable-ActionCenter';         Revert='Enable-ActionCenter' }
     @{ Key='lock-screen';        Label='Disable the lock screen';                      Apply='Disable-LockScreen';           Revert='Enable-LockScreen' }
     @{ Key='search-suggestions'; Label='Disable search box web suggestions';           Apply='Disable-SearchBoxSuggestions'; Revert='Enable-SearchBoxSuggestions' }
-    @{ Key='search-web';         Label='Search: disable web / Bing / Store results';   Apply='Disable-SearchWebResults';     Revert='Enable-SearchWebResults' }
+    @{ Key='search-web';         Label='Search: disable web / Bing / Store-app results in Start'; Apply='Disable-SearchWebResults';     Revert='Enable-SearchWebResults' }
     @{ Key='numlock';            Label='NumLock on at boot';                           Apply='Enable-NumLockAtBoot';         Revert='Disable-NumLockAtBoot' }
     @{ Key='superfetch';         Label='Disable Superfetch (SysMain) + Prefetch';      Apply='Disable-SuperfetchPrefetch';   Revert='Enable-SuperfetchPrefetch' }
     @{ Key='photo-viewer';       Label='Restore the classic Windows Photo Viewer';     Apply='Restore-WindowsPhotoViewer';   Revert='Remove-WindowsPhotoViewer' }
@@ -3996,27 +3996,45 @@ function Enable-SearchBoxSuggestions {
     return $ok
 }
 
-# Start-menu search: turn Bing/web + Store/cloud results off (or back on). Keeps
-# local file/app search; only the online results go away.
+# Start-menu search: turn Bing/web + Store-app/cloud results off (or back on).
+# Keeps local file/app search; only the online results go away - including the
+# "get it from the Microsoft Store" app rows shown for apps you don't have.
 $script:SEARCH_HKCU = 'HKCU\Software\Microsoft\Windows\CurrentVersion\Search'
 $script:SEARCH_POL_HKLM = 'HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows Search'
+$script:SEARCH_SETTINGS_HKCU = 'HKCU\Software\Microsoft\Windows\CurrentVersion\SearchSettings'
+$script:EXPLORER_POL_HKLM = 'HKLM\SOFTWARE\Policies\Microsoft\Windows\Explorer'
+
+# The search UI (SearchHost.exe on Win11, SearchApp.exe on Win10) caches these
+# settings; bounce it so the change shows up without a sign-out. Windows relaunches
+# it automatically on the next search.
+function Restart-SearchHost {
+    Get-Process -Name 'SearchHost', 'SearchApp' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+}
+
 function Disable-SearchWebResults {
-    Write-LogInfo "Disabling web / Bing / Store results in Windows Search (local search stays)..."
+    Write-LogInfo "Disabling web / Bing / Store-app results in Windows Search (local search stays)..."
     Set-UiRegValue -RegPath $script:SEARCH_HKCU -Name 'BingSearchEnabled' -Value 0 | Out-Null
     Set-UiRegValue -RegPath $script:SEARCH_HKCU -Name 'CortanaConsent'    -Value 0 | Out-Null
     Set-UiRegValue -RegPath $script:SEARCH_POL_HKLM -Name 'DisableWebSearch'        -Value 1 | Out-Null
     Set-UiRegValue -RegPath $script:SEARCH_POL_HKLM -Name 'ConnectedSearchUseWeb'   -Value 0 | Out-Null
+    # The online "suggestions" surface is what carries the Store-app result rows.
+    Set-UiRegValue -RegPath $script:EXPLORER_POL_HKLM    -Name 'DisableSearchBoxSuggestions' -Value 1 | Out-Null
+    Set-UiRegValue -RegPath $script:SEARCH_SETTINGS_HKCU -Name 'IsDynamicSearchBoxEnabled'   -Value 0 | Out-Null
+    Restart-SearchHost
     Restart-Explorer
-    Write-LogSuccess "Windows Search web/Store results disabled (Explorer restarted)."
+    Write-LogSuccess "Windows Search web + Store-app results disabled (search host restarted)."
     return $true
 }
 function Enable-SearchWebResults {
-    Write-LogInfo "Re-enabling web / Bing results in Windows Search..."
+    Write-LogInfo "Re-enabling web / Bing / Store-app results in Windows Search..."
     Set-UiRegValue -RegPath $script:SEARCH_HKCU -Name 'BingSearchEnabled' -Value 1 | Out-Null
     Remove-UiRegValue -RegPath $script:SEARCH_POL_HKLM -Name 'DisableWebSearch' | Out-Null
     Remove-UiRegValue -RegPath $script:SEARCH_POL_HKLM -Name 'ConnectedSearchUseWeb' | Out-Null
+    Remove-UiRegValue -RegPath $script:EXPLORER_POL_HKLM -Name 'DisableSearchBoxSuggestions' | Out-Null
+    Set-UiRegValue -RegPath $script:SEARCH_SETTINGS_HKCU -Name 'IsDynamicSearchBoxEnabled' -Value 1 | Out-Null
+    Restart-SearchHost
     Restart-Explorer
-    Write-LogSuccess "Windows Search web results re-enabled (Explorer restarted)."
+    Write-LogSuccess "Windows Search web + Store-app results re-enabled (search host restarted)."
     return $true
 }
 
