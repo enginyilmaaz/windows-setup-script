@@ -24,9 +24,9 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.9.8'
-$script:SCRIPT_REVISION = '56'
-$script:SCRIPT_DATE     = '2026-08-19'
+$script:SCRIPT_VERSION  = '1.9.9'
+$script:SCRIPT_REVISION = '57'
+$script:SCRIPT_DATE     = '2026-10-08'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
 $script:SELF_URL = 'https://bit.ly/windows-ey'
@@ -4017,9 +4017,13 @@ function Disable-SearchWebResults {
     Set-UiRegValue -RegPath $script:SEARCH_HKCU -Name 'CortanaConsent'    -Value 0 | Out-Null
     Set-UiRegValue -RegPath $script:SEARCH_POL_HKLM -Name 'DisableWebSearch'        -Value 1 | Out-Null
     Set-UiRegValue -RegPath $script:SEARCH_POL_HKLM -Name 'ConnectedSearchUseWeb'   -Value 0 | Out-Null
-    # The online "suggestions" surface is what carries the Store-app result rows.
     Set-UiRegValue -RegPath $script:EXPLORER_POL_HKLM    -Name 'DisableSearchBoxSuggestions' -Value 1 | Out-Null
     Set-UiRegValue -RegPath $script:SEARCH_SETTINGS_HKCU -Name 'IsDynamicSearchBoxEnabled'   -Value 0 | Out-Null
+    # The values above only reach web/Bing results. Since KB5120998 (Aug 2026) the
+    # "get it from the Microsoft Store" rows sit behind their own switch - Settings >
+    # Privacy & security > Search > "Show suggested search results" - backed by these.
+    Set-UiRegValue -RegPath $script:SEARCH_SETTINGS_HKCU -Name 'IsStoreSuggestionsEnabled'   -Value 0 | Out-Null
+    Set-UiRegValue -RegPath $script:SEARCH_SETTINGS_HKCU -Name 'IsWebSuggestionsEnabled'     -Value 0 | Out-Null
     Restart-SearchHost
     Restart-Explorer
     Write-LogSuccess "Windows Search web + Store-app results disabled (search host restarted)."
@@ -4032,6 +4036,8 @@ function Enable-SearchWebResults {
     Remove-UiRegValue -RegPath $script:SEARCH_POL_HKLM -Name 'ConnectedSearchUseWeb' | Out-Null
     Remove-UiRegValue -RegPath $script:EXPLORER_POL_HKLM -Name 'DisableSearchBoxSuggestions' | Out-Null
     Set-UiRegValue -RegPath $script:SEARCH_SETTINGS_HKCU -Name 'IsDynamicSearchBoxEnabled' -Value 1 | Out-Null
+    Set-UiRegValue -RegPath $script:SEARCH_SETTINGS_HKCU -Name 'IsStoreSuggestionsEnabled' -Value 1 | Out-Null
+    Set-UiRegValue -RegPath $script:SEARCH_SETTINGS_HKCU -Name 'IsWebSuggestionsEnabled'   -Value 1 | Out-Null
     Restart-SearchHost
     Restart-Explorer
     Write-LogSuccess "Windows Search web + Store-app results re-enabled (search host restarted)."
@@ -4253,8 +4259,10 @@ function Test-UiTweakApplied {
                 return ($null -ne $v -and [int]$v -eq 1)
             }
             'search-web' {
-                $v = Get-UiRegValue -RegPath $script:SEARCH_HKCU -Name 'BingSearchEnabled'
-                return ($null -ne $v -and [int]$v -eq 0)
+                # The Store switch too: hosts that ran the older, web-only version still show Store rows.
+                $vb = Get-UiRegValue -RegPath $script:SEARCH_HKCU -Name 'BingSearchEnabled'
+                $vs = Get-UiRegValue -RegPath $script:SEARCH_SETTINGS_HKCU -Name 'IsStoreSuggestionsEnabled'
+                return ($null -ne $vb -and [int]$vb -eq 0 -and $null -ne $vs -and [int]$vs -eq 0)
             }
             'numlock' {
                 $v = Get-UiRegValue -RegPath $script:NUMLOCK_KEY_DEFAULT -Name 'InitialKeyboardIndicators'
