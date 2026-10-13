@@ -25,7 +25,7 @@
 #===============================================================================
 
 $script:SCRIPT_VERSION  = '1.9.9'
-$script:SCRIPT_REVISION = '57'
+$script:SCRIPT_REVISION = '58'
 $script:SCRIPT_DATE     = '2026-10-08'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -732,11 +732,12 @@ function Enable-ServiceItem {
     } catch { Write-LogWarning "Could not re-enable $($Item.Svc): $($_.Exception.Message)"; return $false }
 }
 
-# CLI aliases (own submenu group). cckimi/ccglm/ccort/ccart auto-bundle their *-token setter
+# CLI aliases (own submenu group). ccapi/cckimi/ccglm/ccort/ccart auto-bundle their *-token setter
 # (and, for the gateways, their *-model picker).
 $script:CliAliases = @(
     @{ Key='ccskip'; Label='ccskip  (Claude skip-permissions, Opus 4.8)' }
     @{ Key='cxskip'; Label='cxskip  (Claude skip-permissions, Opus 5)' }
+    @{ Key='ccapi';  Label='ccapi   (Claude Code on the Anthropic Console API key, no subscription)  [+ ccapi-token]' }
     @{ Key='cckimi'; Label='cckimi  (Claude Code on the Kimi backend)  [+ cckimi-token]' }
     @{ Key='ccglm';  Label='ccglm   (Claude Code on the Z.AI GLM backend)  [+ ccglm-token]' }
     @{ Key='ccort';   Label='ccort    (Claude Code on OpenRouter, stealth/ox-alpha)  [+ ccort-token, ccort-model]' }
@@ -2362,7 +2363,7 @@ function Remove-AliasEverywhere {
     }
 }
 
-# CLI Aliases: install ccskip / cxskip / cckimi / ccglm / ccort / ccart (Claude/Codex helpers) plus
+# CLI Aliases: install ccskip / cxskip / ccapi / cckimi / ccglm / ccort / ccart (Claude helpers) plus
 # their *-token / *-model setters as standalone .cmd commands under %USERPROFILE%\apps\aliases
 # and add that folder to PATH, so they work from ANY shell (cmd, PowerShell, Run). Pure
 # batch, one self-contained .cmd each - no .ps1. Env vars are scoped via setlocal to that
@@ -2391,6 +2392,47 @@ call claude --dangerously-skip-permissions --effort max --model claude-opus-4-8 
         $cmds['cxskip'] = @'
 @echo off
 call claude --dangerously-skip-permissions --effort max --model claude-opus-5 %*
+'@
+        $cmds['ccapi'] = @'
+@echo off
+setlocal
+set "TOKENFILE=%USERPROFILE%\.anthropic_token"
+set "token="
+if exist "%TOKENFILE%" set /p token=<"%TOKENFILE%"
+if not "%token%"=="" goto :run
+set /p token=ccapi: no API key found. Enter your Anthropic Console API key:
+if "%token%"=="" (
+    echo ccapi: no key entered, aborting.
+    exit /b 1
+)
+>"%TOKENFILE%" echo %token%
+icacls "%TOKENFILE%" /inheritance:r /grant:r "%USERNAME%:(R,W)" >nul 2>&1
+echo ccapi: key saved to %TOKENFILE% (current-user only).
+:run
+rem Anthropic Console API key instead of the Claude subscription: Claude Code ranks
+rem ANTHROPIC_API_KEY ABOVE the /login credential, so ccapi bills this key per token while
+rem ccskip on the same machine keeps using the subscription. ANTHROPIC_AUTH_TOKEN ranks above
+rem the key, so it is blanked, and the base URL is pinned so a gateway left in the
+rem environment cannot hijack the run. The first interactive run asks once to approve the
+rem key over your login - say yes (reversible from /config, "Use custom API key").
+set "ANTHROPIC_API_KEY=%token%"
+set "ANTHROPIC_AUTH_TOKEN="
+set "ANTHROPIC_BASE_URL=https://api.anthropic.com"
+call claude --dangerously-skip-permissions --model claude-opus-5-5 %*
+'@
+        $cmds['ccapi-token'] = @'
+@echo off
+setlocal
+set "TOKENFILE=%USERPROFILE%\.anthropic_token"
+set "key=%~1"
+if "%key%"=="" set /p key=ccapi-token - paste API key:
+if "%key%"=="" (
+    echo ccapi-token: no key given.
+    exit /b 1
+)
+>"%TOKENFILE%" echo %key%
+icacls "%TOKENFILE%" /inheritance:r /grant:r "%USERNAME%:(R,W)" >nul 2>&1
+echo ccapi-token: key written to %TOKENFILE% (current-user only).
 '@
         $cmds['cckimi'] = @'
 @echo off
@@ -2693,6 +2735,7 @@ echo ccart-model: model set to %chosen% (%MODELFILE%).
         $sel = @($script:SelectedAliases)
         $install = @{}
         foreach ($k in $sel) { if ($cmds.Contains($k)) { $install[$k] = $true } }
+        if ($install['ccapi'])  { $install['ccapi-token']  = $true }   # ccapi  -> also ccapi-token
         if ($install['cckimi']) { $install['cckimi-token'] = $true }   # cckimi -> also cckimi-token
         if ($install['ccglm'])  { $install['ccglm-token']  = $true }   # ccglm  -> also ccglm-token
         if ($install['ccort'])   { $install['ccort-token']   = $true      # ccort   -> also ccort-token
@@ -5797,7 +5840,7 @@ function Show-TweaksSubmenu {
         $mk = ''; if (Test-TweakApplied -Key $t.Key) { $mk = 'applied' }
         [void]$rows.Add(@{ Num = $n; Label = $t.Label; Desc = ''; Marker = $mk; Selected = ($script:SelectedTweaks -contains $t.Key); IsGroup = $false; OnEnter = $null; Kind = 'tweak'; Ref = $t })
     }
-    # CLI aliases - individually selectable here; cckimi/ccglm/ccort/ccart auto-add their setters.
+    # CLI aliases - individually selectable here; ccapi/cckimi/ccglm/ccort/ccart auto-add their setters.
     foreach ($a in $script:CliAliases) {
         $n++
         $mk = if (Test-AliasInstalled $a.Key) { 'installed' } else { '' }
