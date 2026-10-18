@@ -69,7 +69,6 @@ $flags = @{
     Remote     = $false
     # windows-native groups (were GNOME tweaks / debloat)
     Tweaks     = $false; Debloat = $false; UiTweaks = $false; Services = $false
-    Modes      = $false
     # helpers / special commands
     Login      = $false; SkipUpdate = $false
     ShowBackup = $false; Restore = $false
@@ -145,8 +144,6 @@ foreach ($arg in $script:RAW_ARGS) {
         'reg-tweaks'  { $flags.UiTweaks = $true }
         'services'    { $flags.Services = $true }
         'svc'         { $flags.Services = $true }
-        'modes'       { $flags.Modes = $true }
-        'powermodes'  { $flags.Modes = $true }
         # helpers / special
         'login'       { $flags.Login = $true }
         'skip-update' { $flags.SkipUpdate = $true }
@@ -558,7 +555,6 @@ WINDOWS TWEAKS / DEBLOAT:
                      applied [x] or reverted [r] from the submenu)
   --debloat         Remove pre-installed Windows bloat (submenu)
   --services        Disable / re-enable safe Windows services (submenu; alias --svc)
-  --modes           Switch the active Windows power scheme (submenu; alias --powermodes)
 
 HELPERS:
   --login           CLI login helpers
@@ -5409,7 +5405,6 @@ $script:SelectedVSCodeExt   = @()
 # key -> 'apply' | 'revert'.
 $script:SelectedUiTweaks    = @{}
 $script:SelectedServices    = @{}
-$script:SelectedPowerScheme = $null
 $script:SelectedAliases     = @()
 $script:AliasesTouched      = $false
 $script:VSCodeApplySettings = $true
@@ -5850,52 +5845,6 @@ function Show-VSCodeSubmenu {
 #-------------------------------------------------------------------------------
 # Main interactive menu (birebir: one flat numbered list, groups expand on ENTER)
 #-------------------------------------------------------------------------------
-#-------------------------------------------------------------------------------
-# Windows Modes - switch the active power scheme. Schemes are read live from
-# powercfg: duplicated plans (Ultimate/High Performance) get fresh GUIDs per
-# machine, so nothing is hardcoded and any scheme the user created shows up.
-#-------------------------------------------------------------------------------
-function Get-PowerSchemes {
-    $schemes = @()
-    foreach ($line in @(& powercfg -list 2>$null)) {
-        if ($line -match '^Power Scheme GUID:\s*([0-9a-fA-F-]{36})\s*\(([^)]*)\)(\s*\*)?') {
-            $schemes += @{ Guid = $Matches[1]; Name = $Matches[2].Trim(); Active = [bool]$Matches[3] }
-        }
-    }
-    return $schemes
-}
-
-function Show-WindowsModesSubmenu {
-    $rows = New-Object System.Collections.ArrayList
-    $n = 0
-    foreach ($s in Get-PowerSchemes) {
-        $n++
-        $mk = ''; if ($s.Active) { $mk = 'active' }
-        # Nothing pre-checked: the marker shows what is active, checking = switch to it.
-        [void]$rows.Add(@{ Num = $n; Label = $s.Name; Desc = $s.Guid; Marker = $mk; Selected = $false; IsGroup = $false; OnEnter = $null; Ref = $s })
-    }
-    [void](Invoke-SelectMenu -Banner 'Windows Modes    [x] = make the active power scheme' -Rows $rows -SubMenu)
-    # Rows are "which one to activate": several checked end on the last one.
-    $picked = @($rows | Where-Object { $_.Selected })
-    $script:SelectedPowerScheme = if ($picked.Count) { $picked[-1].Ref } else { $null }
-    $flags.Modes = ($null -ne $script:SelectedPowerScheme)
-}
-
-function Invoke-WindowsModes {
-    if (-not $script:SelectedPowerScheme) { Show-WindowsModesSubmenu }
-    if (-not $script:SelectedPowerScheme) { return }
-    $s = $script:SelectedPowerScheme
-    Write-LogStep "Switching power mode"
-    & powercfg -setactive $s.Guid 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Write-LogSuccess "Power mode set to '$($s.Name)'."
-        Add-Summary "Power mode: $($s.Name)"
-    } else {
-        Write-LogWarning "Could not set power mode '$($s.Name)' (powercfg exit $LASTEXITCODE)."
-        Add-Summary "Power mode: $($s.Name)" $false
-    }
-}
-
 function Show-InteractiveMenu {
     Reset-DetectionCache
     Write-Host ""
@@ -5910,7 +5859,6 @@ function Show-InteractiveMenu {
     $twInst = @($script:WindowsTweaks| Where-Object { Test-TweakApplied -Key $_.Key }).Count
     $uiInst = @($script:UiTweaks     | Where-Object { Test-UiTweakApplied -Key $_.Key }).Count
     $svcInst = @($script:ServiceItems | Where-Object { Test-ServiceDisabled -Item $_ }).Count
-    $activeMode = (Get-PowerSchemes | Where-Object { $_.Active } | Select-Object -First 1).Name
     $dbInst = @($script:DebloatItems | Where-Object { Test-BloatRemoved -Item $_ }).Count
     $vsInst = if (Test-VSCodeInstalled) { 'installed' } else { '' }
     Stop-Spinner $sp
@@ -5925,7 +5873,6 @@ function Show-InteractiveMenu {
         @{ k='tweaks';      group='tweaks';  label='Tweaks';       desc='Windows tweaks (Enter to expand)'; marker=(Get-GroupMarkerText $twInst $script:WindowsTweaks.Count 'applied') }
         @{ k='uitweaks';    group='uitweaks';label='Explorer & UI'; desc='This PC / nav pane / context menu / registry tweaks (Enter to expand)'; marker=(Get-GroupMarkerText $uiInst $script:UiTweaks.Count 'applied') }
         @{ k='services';    group='services';label='Services';      desc='Disable / re-enable safe Windows services (Enter to expand)'; marker=(Get-GroupMarkerText $svcInst $script:ServiceItems.Count 'disabled') }
-        @{ k='modes';       group='modes';   label='Windows Modes'; desc='Switch the active power scheme (Enter to expand)'; marker=$activeMode }
         @{ k='dbeaver';                       label='DBeaver';      desc='DBeaver CE (database tool)' }
         @{ k='vlc';                           label='VLC';          desc='VLC Media Player' }
         @{ k='notepad++';                     label='Notepad++';    desc='Notepad++ text editor' }
@@ -5959,7 +5906,6 @@ function Show-InteractiveMenu {
                 'tweaks'  { { Show-TweaksSubmenu } }
                 'uitweaks'{ { Show-UiTweaksSubmenu } }
                 'services'{ { Show-ServicesSubmenu } }
-                'modes'   { { Show-WindowsModesSubmenu } }
                 'aicli'   { { Show-AiCliSubmenu } }
                 'debloat' { { Show-DebloatSubmenu } }
             }
@@ -5969,7 +5915,6 @@ function Show-InteractiveMenu {
                 'tweaks'  { { $script:SelectedTweaks.Count -gt 0 -or $script:SelectedAliases.Count -gt 0 } }
                 'uitweaks'{ { $script:SelectedUiTweaks.Count -gt 0 } }
                 'services'{ { $script:SelectedServices.Count -gt 0 } }
-                'modes'   { { $null -ne $script:SelectedPowerScheme } }
                 'aicli'   { { @($script:AiCliTools | Where-Object { $flags[$_.Flag] }).Count -gt 0 } }
                 'debloat' { { $script:SelectedDebloat.Count -gt 0 } }
             }
@@ -5990,7 +5935,6 @@ function Show-InteractiveMenu {
         if ($script:SelectedTweaks.Count)  { $parts += "Tweaks[$($script:SelectedTweaks.Count)]" }
         if ($script:SelectedUiTweaks.Count) { $parts += "UI[$($script:SelectedUiTweaks.Count)]" }
         if ($script:SelectedServices.Count) { $parts += "Svc[$($script:SelectedServices.Count)]" }
-        if ($script:SelectedPowerScheme)    { $parts += "Mode[$($script:SelectedPowerScheme.Name)]" }
         if ($script:SelectedDebloat.Count) { $parts += "Debloat[$($script:SelectedDebloat.Count)]" }
         if ($script:SelectedAliases.Count) { $parts += "Aliases[$($script:SelectedAliases.Count)]" }
         if ($flags.VSCode) { $parts += 'VSCode' }
@@ -6019,7 +5963,6 @@ function Show-InteractiveMenu {
         $script:SelectedAliases = @(); $script:AliasesTouched = $true
         $script:SelectedUiTweaks = @{}
         $script:SelectedServices = @{}
-        $script:SelectedPowerScheme = $null; $flags.Modes = $false
         $flags.Tweaks = $false; $flags.Debloat = $false; $flags.VSCode = $false; $flags.UiTweaks = $false; $flags.Services = $false
     }
 
@@ -6171,9 +6114,6 @@ function Invoke-Installations {
     if ($flags.Tweaks)   { Invoke-Tweaks }
     if ($flags.UiTweaks) { Invoke-UiTweaks }
     if ($flags.Services) { Invoke-Services }
-    # Deliberately not part of select-all: switching the machine's power mode is a
-    # behaviour change, not an install.
-    if ($flags.Modes)    { Invoke-WindowsModes }
     if ($flags.Debloat) {
         if (-not $script:SelectedDebloat -or $script:SelectedDebloat.Count -eq 0) { Show-DebloatSubmenu }
         Invoke-Debloat

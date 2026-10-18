@@ -206,10 +206,6 @@ Remove pre-installed Windows apps and (optionally) the dev tools/browsers this s
 
 Tri-state submenu (`[x]` = disable, `[r]` = re-enable to the default start type) for ~47 Windows services that are **safe to turn off** — disabling one only stops that feature, never core networking / audio / notifications / time / MS-account. Grouped: telemetry & diagnostics, security/legacy, Xbox, print/scan/fax, and sensors/biometric/location/payments. Core services (networking, audio, updates, connected-devices, per-user `_LUID` services) are deliberately **not** listed. Edit `$script:ServiceItems` to customise. Nothing here is selected by `a` (all).
 
-### ⚡ Windows Modes (`--modes`)
-
-Submenu that lists the machine's power schemes **live** (`powercfg -list`), so custom and duplicated plans — e.g. *Ultimate Performance*, which gets a fresh GUID on every machine — appear with their real names and the active one marked. Check the scheme you want and confirm: it becomes the active mode via `powercfg -setactive` (instant, no admin, no reboot; the main-menu row shows the current mode). Companion to the *Power Manager* install entry above. Not part of `a` (all).
-
 ## 🎛️ Interactive Menu
 
 Run without flags (or with `--menu`) for a keyboard-driven menu:
