@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.9.11'
-$script:SCRIPT_REVISION = '61'
+$script:SCRIPT_VERSION  = '1.9.12'
+$script:SCRIPT_REVISION = '62'
 $script:SCRIPT_DATE     = '2026-10-18'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -229,6 +229,29 @@ function Get-PowerShellPath {
 # Elevation (sudo analog): relaunch self as Administrator, preserving args.
 # Works both from a file (-File) and from `irm | iex` (re-fetch via SELF_URL).
 #===============================================================================
+# Elevation was refused by the OS (access denied etc.) - explain the likely cause
+# and give the manual path, which works no matter what blocked the automatic one.
+function Show-ElevationFailure {
+    param([string]$Reason)
+    Write-LogError "Elevation failed: $Reason"
+    # Administrators group = S-1-5-32-544: present-but-filtered for admin accounts
+    # under UAC, absent for standard accounts.
+    $isAdminGroup = (@(whoami /groups) -match 'S-1-5-32-544').Count -gt 0
+    if (-not $isAdminGroup) {
+        Write-Host "  This account is a standard user - Windows cannot elevate it."
+        Write-Host "  Sign in with an administrator account and run the command there."
+    } else {
+        Write-Host "  UAC or a policy blocked the automatic elevation prompt"
+        Write-Host "  (auto-deny elevation, non-interactive terminal, or antivirus)."
+    }
+    Write-Host ""
+    Write-Host "  Manual way (always works): open PowerShell as Administrator"
+    Write-Host "  (Win+X > Terminal (Admin), or right-click > Run as administrator), then:"
+    Write-Host ""
+    Write-Host "      irm '$($script:SELF_URL)' | iex"
+    Write-Host ""
+}
+
 function Invoke-Elevation {
     if (Test-Admin) { return }
     Write-LogWarning "Administrator privileges are required. Relaunching as Administrator..."
@@ -260,11 +283,15 @@ function Invoke-Elevation {
                 Start-Process -FilePath $fallback -Verb RunAs -ArgumentList $spArgs | Out-Null
                 exit 0
             } catch {
-                Write-LogError "Elevation failed even on Windows PowerShell: $($_.Exception.Message)"
+                Show-ElevationFailure $_.Exception.Message
                 exit 1
             }
         }
-        Write-LogError "Elevation was cancelled or failed: $($_.Exception.Message)"
+        if ($cancelled) {
+            Write-LogError "Elevation was cancelled. Re-run and accept the UAC prompt, or start an elevated PowerShell yourself."
+            exit 1
+        }
+        Show-ElevationFailure $_.Exception.Message
         exit 1
     }
     exit 0
