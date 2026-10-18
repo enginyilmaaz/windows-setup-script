@@ -25,7 +25,7 @@
 #===============================================================================
 
 $script:SCRIPT_VERSION  = '1.9.12'
-$script:SCRIPT_REVISION = '62'
+$script:SCRIPT_REVISION = '63'
 $script:SCRIPT_DATE     = '2026-10-18'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -234,9 +234,11 @@ function Get-PowerShellPath {
 function Show-ElevationFailure {
     param([string]$Reason)
     Write-LogError "Elevation failed: $Reason"
-    # Administrators group = S-1-5-32-544: present-but-filtered for admin accounts
-    # under UAC, absent for standard accounts.
-    $isAdminGroup = (@(whoami /groups) -match 'S-1-5-32-544').Count -gt 0
+    # Administrators group = S-1-5-32-544: "deny only" for admin accounts under
+    # UAC (WindowsIdentity.Groups drops it silently), absent for standard accounts.
+    # Full path so a whoami on PATH (e.g. Git's, which rejects /groups) is skipped;
+    # the SID is locale-independent even though the group name is localized.
+    $isAdminGroup = (@(& (Join-Path $env:WINDIR 'System32\whoami.exe') /groups 2>$null) -match 'S-1-5-32-544').Count -gt 0
     if (-not $isAdminGroup) {
         Write-Host "  This account is a standard user - Windows cannot elevate it."
         Write-Host "  Sign in with an administrator account and run the command there."
