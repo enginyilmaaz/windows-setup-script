@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.9.10'
-$script:SCRIPT_REVISION = '60'
+$script:SCRIPT_VERSION  = '1.9.11'
+$script:SCRIPT_REVISION = '61'
 $script:SCRIPT_DATE     = '2026-10-18'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -216,10 +216,12 @@ function Test-Admin {
     (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
 }
 
-# Path to the best available PowerShell host (pwsh preferred, else Windows PowerShell)
+# Path to the best available PowerShell host (pwsh preferred, else Windows PowerShell).
+# Skips pwsh under \WindowsApps\ (Store/MSIX): its execution alias can fail to
+# launch elevated even after UAC consent was given.
 function Get-PowerShellPath {
     $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
-    if ($pwsh) { return $pwsh.Source }
+    if ($pwsh -and $pwsh.Source -notmatch '\\WindowsApps\\') { return $pwsh.Source }
     return (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe')
 }
 
@@ -248,7 +250,21 @@ function Invoke-Elevation {
         }
         Start-Process -FilePath $ps -Verb RunAs -ArgumentList $spArgs | Out-Null
     } catch {
-        Write-LogError "Elevation was cancelled or failed. Please run this script as Administrator."
+        # A UAC "No" surfaces as a cancellation (ERROR_CANCELLED); anything else
+        # (e.g. a pwsh that cannot launch elevated even after consent) is worth
+        # one retry on the built-in Windows PowerShell before giving up.
+        $fallback = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $cancelled = ($_.Exception.HResult -eq -2147023673) -or ($_.Exception.Message -match 'cancel|iptal')
+        if (-not $cancelled -and $ps -ne $fallback) {
+            try {
+                Start-Process -FilePath $fallback -Verb RunAs -ArgumentList $spArgs | Out-Null
+                exit 0
+            } catch {
+                Write-LogError "Elevation failed even on Windows PowerShell: $($_.Exception.Message)"
+                exit 1
+            }
+        }
+        Write-LogError "Elevation was cancelled or failed: $($_.Exception.Message)"
         exit 1
     }
     exit 0
