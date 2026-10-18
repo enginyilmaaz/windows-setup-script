@@ -25,7 +25,7 @@
 #===============================================================================
 
 $script:SCRIPT_VERSION  = '1.9.12'
-$script:SCRIPT_REVISION = '63'
+$script:SCRIPT_REVISION = '64'
 $script:SCRIPT_DATE     = '2026-10-18'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -781,16 +781,14 @@ function Enable-ServiceItem {
     } catch { Write-LogWarning "Could not re-enable $($Item.Svc): $($_.Exception.Message)"; return $false }
 }
 
-# CLI aliases (own submenu group). ccapi/cckimi/ccglm/ccort/ccart auto-bundle their *-token setter
+# CLI aliases (own submenu group). cckimi/ccglm/ccort auto-bundle their *-token setter
 # (and, for the gateways, their *-model picker).
 $script:CliAliases = @(
     @{ Key='ccskip'; Label='ccskip  (Claude skip-permissions, Opus 4.8)' }
     @{ Key='cxskip'; Label='cxskip  (Claude skip-permissions, Opus 5)' }
-    @{ Key='ccapi';  Label='ccapi   (Claude Code on the Anthropic Console API key, no subscription)  [+ ccapi-token]' }
     @{ Key='cckimi'; Label='cckimi  (Claude Code on the Kimi backend)  [+ cckimi-token]' }
     @{ Key='ccglm';  Label='ccglm   (Claude Code on the Z.AI GLM backend)  [+ ccglm-token]' }
     @{ Key='ccort';   Label='ccort    (Claude Code on OpenRouter, stealth/ox-alpha)  [+ ccort-token, ccort-model]' }
-    @{ Key='ccart';  Label='ccart   (Claude Code on AgentRouter, claude-opus-5)  [+ ccart-token, ccart-model]' }
 )
 
 # VS Code extensions (VS Code submenu) - IDs mirror the source install_vscode_extensions
@@ -2412,7 +2410,7 @@ function Remove-AliasEverywhere {
     }
 }
 
-# CLI Aliases: install ccskip / cxskip / ccapi / cckimi / ccglm / ccort / ccart (Claude helpers) plus
+# CLI Aliases: install ccskip / cxskip / cckimi / ccglm / ccort (Claude/Codex helpers) plus
 # their *-token / *-model setters as standalone .cmd commands under %USERPROFILE%\apps\aliases
 # and add that folder to PATH, so they work from ANY shell (cmd, PowerShell, Run). Pure
 # batch, one self-contained .cmd each - no .ps1. Env vars are scoped via setlocal to that
@@ -2441,47 +2439,6 @@ call claude --dangerously-skip-permissions --effort max --model claude-opus-4-8 
         $cmds['cxskip'] = @'
 @echo off
 call claude --dangerously-skip-permissions --effort max --model claude-opus-5 %*
-'@
-        $cmds['ccapi'] = @'
-@echo off
-setlocal
-set "TOKENFILE=%USERPROFILE%\.anthropic_token"
-set "token="
-if exist "%TOKENFILE%" set /p token=<"%TOKENFILE%"
-if not "%token%"=="" goto :run
-set /p token=ccapi: no API key found. Enter your Anthropic Console API key:
-if "%token%"=="" (
-    echo ccapi: no key entered, aborting.
-    exit /b 1
-)
->"%TOKENFILE%" echo %token%
-icacls "%TOKENFILE%" /inheritance:r /grant:r "%USERNAME%:(R,W)" >nul 2>&1
-echo ccapi: key saved to %TOKENFILE% (current-user only).
-:run
-rem Anthropic Console API key instead of the Claude subscription: Claude Code ranks
-rem ANTHROPIC_API_KEY ABOVE the /login credential, so ccapi bills this key per token while
-rem ccskip on the same machine keeps using the subscription. ANTHROPIC_AUTH_TOKEN ranks above
-rem the key, so it is blanked, and the base URL is pinned so a gateway left in the
-rem environment cannot hijack the run. The first interactive run asks once to approve the
-rem key over your login - say yes (reversible from /config, "Use custom API key").
-set "ANTHROPIC_API_KEY=%token%"
-set "ANTHROPIC_AUTH_TOKEN="
-set "ANTHROPIC_BASE_URL=https://api.anthropic.com"
-call claude --dangerously-skip-permissions --model claude-opus-5-5 %*
-'@
-        $cmds['ccapi-token'] = @'
-@echo off
-setlocal
-set "TOKENFILE=%USERPROFILE%\.anthropic_token"
-set "key=%~1"
-if "%key%"=="" set /p key=ccapi-token - paste API key:
-if "%key%"=="" (
-    echo ccapi-token: no key given.
-    exit /b 1
-)
->"%TOKENFILE%" echo %key%
-icacls "%TOKENFILE%" /inheritance:r /grant:r "%USERNAME%:(R,W)" >nul 2>&1
-echo ccapi-token: key written to %TOKENFILE% (current-user only).
 '@
         $cmds['cckimi'] = @'
 @echo off
@@ -2682,115 +2639,15 @@ if "%chosen%"=="" (
 echo ccort-model: model set to %chosen% (%MODELFILE%).
 echo echo More ids: https://openrouter.ai/models
 '@
-        $cmds['ccart'] = @'
-@echo off
-setlocal
-set "TOKENFILE=%USERPROFILE%\.agentrouter_token"
-set "MODELFILE=%USERPROFILE%\.agentrouter_model"
-set "token="
-if exist "%TOKENFILE%" set /p token=<"%TOKENFILE%"
-if not "%token%"=="" goto :run
-set /p token=ccart: no API key found. Enter your AgentRouter API key:
-if "%token%"=="" (
-    echo ccart: no key entered, aborting.
-    exit /b 1
-)
->"%TOKENFILE%" echo %token%
-icacls "%TOKENFILE%" /inheritance:r /grant:r "%USERNAME%:(R,W)" >nul 2>&1
-echo ccart: key saved to %TOKENFILE% (current-user only).
-:run
-rem ---- Models: leave these EMPTY to follow ccart-model / the default below ---------
-rem AgentRouter serves a short list - claude-opus-5, claude-opus-4-8, gpt-5.6-sol,
-rem deepseek-v4f. Fill one in only to pin that tier here.
-set "AR_MODEL="
-set "AR_SONNET_MODEL="
-set "AR_HAIKU_MODEL="
-set "AR_FABLE_MODEL="
-set "AR_SUBAGENT_MODEL="
-set "AR_DEFAULT_MODEL=claude-opus-5"
-rem ---------------------------------------------------------------------------------
-rem Resolution order for the main model: pinned above -> .agentrouter_model -> default.
-if "%AR_MODEL%"=="" if exist "%MODELFILE%" set /p AR_MODEL=<"%MODELFILE%"
-if "%AR_MODEL%"=="" (
-    rem Adopt the default once and record it, so this notice shows on the FIRST run only.
-    set "AR_MODEL=%AR_DEFAULT_MODEL%"
-    >"%MODELFILE%" echo %AR_DEFAULT_MODEL%
-    echo ccart: no model set -- adopting the default %AR_DEFAULT_MODEL%, saved to %MODELFILE%.
-    echo        pick another any time with: ccart-model
-)
-if "%AR_SONNET_MODEL%"=="" set "AR_SONNET_MODEL=%AR_MODEL%"
-if "%AR_HAIKU_MODEL%"=="" set "AR_HAIKU_MODEL=%AR_MODEL%"
-if "%AR_FABLE_MODEL%"=="" set "AR_FABLE_MODEL=%AR_MODEL%"
-if "%AR_SUBAGENT_MODEL%"=="" set "AR_SUBAGENT_MODEL=%AR_MODEL%"
-set "ANTHROPIC_BASE_URL=https://agentrouter.org"
-set "ANTHROPIC_AUTH_TOKEN=%token%"
-rem ANTHROPIC_API_KEY is blanked so the gateway only ever sees the Bearer token:
-rem Claude Code sends ANTHROPIC_API_KEY as x-api-key, a direct-Anthropic credential.
-set "ANTHROPIC_API_KEY="
-set "ANTHROPIC_MODEL=%AR_MODEL%"
-set "ANTHROPIC_DEFAULT_OPUS_MODEL=%AR_MODEL%"
-set "ANTHROPIC_DEFAULT_SONNET_MODEL=%AR_SONNET_MODEL%"
-set "ANTHROPIC_DEFAULT_HAIKU_MODEL=%AR_HAIKU_MODEL%"
-set "ANTHROPIC_DEFAULT_FABLE_MODEL=%AR_FABLE_MODEL%"
-set "CLAUDE_CODE_SUBAGENT_MODEL=%AR_SUBAGENT_MODEL%"
-set "API_TIMEOUT_MS=3000000"
-call claude --dangerously-skip-permissions %*
-'@
-        $cmds['ccart-token'] = @'
-@echo off
-setlocal
-set "TOKENFILE=%USERPROFILE%\.agentrouter_token"
-set "key=%~1"
-if "%key%"=="" set /p key=ccart-token - paste API key:
-if "%key%"=="" (
-    echo ccart-token: no key given.
-    exit /b 1
-)
->"%TOKENFILE%" echo %key%
-icacls "%TOKENFILE%" /inheritance:r /grant:r "%USERNAME%:(R,W)" >nul 2>&1
-echo ccart-token: key written to %TOKENFILE% (current-user only).
-'@
-        $cmds['ccart-model'] = @'
-@echo off
-setlocal
-set "MODELFILE=%USERPROFILE%\.agentrouter_model"
-set "chosen="
-if not "%~1"=="" set "chosen=%~1"
-if not "%chosen%"=="" goto :save
-set "current="
-if exist "%MODELFILE%" set /p current=<"%MODELFILE%"
-echo ccart-model - pick a model:
-if "%current%"=="claude-opus-5" (echo    1. claude-opus-5   [current]) else (echo    1. claude-opus-5)
-if "%current%"=="claude-opus-4-8" (echo    2. claude-opus-4-8   [current]) else (echo    2. claude-opus-4-8)
-if "%current%"=="gpt-5.6-sol[1m]" (echo    3. gpt-5.6-sol[1m]   [current]) else (echo    3. gpt-5.6-sol[1m])
-if "%current%"=="deepseek-v4f[1m]" (echo    4. deepseek-v4f[1m]   [current]) else (echo    4. deepseek-v4f[1m])
-echo     0. type a different id by hand
-set /p pick=choice [1-4, 0]: 
-if "%pick%"=="1" set "chosen=claude-opus-5"
-if "%pick%"=="2" set "chosen=claude-opus-4-8"
-if "%pick%"=="3" set "chosen=gpt-5.6-sol[1m]"
-if "%pick%"=="4" set "chosen=deepseek-v4f[1m]"
-if "%pick%"=="0" set /p chosen=model id: 
-:save
-if "%chosen%"=="" (
-    echo ccart-model: nothing picked, %MODELFILE% left unchanged.
-    exit /b 1
-)
->"%MODELFILE%" echo %chosen%
-echo ccart-model: model set to %chosen% (%MODELFILE%).
-'@
 
         # Build the install set from the SELECTED aliases; auto-bundle the *-token setters.
         $sel = @($script:SelectedAliases)
         $install = @{}
         foreach ($k in $sel) { if ($cmds.Contains($k)) { $install[$k] = $true } }
-        if ($install['ccapi'])  { $install['ccapi-token']  = $true }   # ccapi  -> also ccapi-token
         if ($install['cckimi']) { $install['cckimi-token'] = $true }   # cckimi -> also cckimi-token
         if ($install['ccglm'])  { $install['ccglm-token']  = $true }   # ccglm  -> also ccglm-token
         if ($install['ccort'])   { $install['ccort-token']   = $true      # ccort   -> also ccort-token
                                   $install['ccort-model']   = $true }  #        -> and ccort-model
-        if ($install['ccart'])  { $install['ccart-token']  = $true      # ccart  -> also ccart-token
-                                  $install['ccart-model']  = $true }  #        -> and ccart-model
 
         # If any selected alias is already installed, ask once before overwriting them.
         $already = @($cmds.Keys | Where-Object { $install[$_] -and (Test-AliasInstalled $_) })
@@ -2804,8 +2661,10 @@ echo ccart-model: model set to %chosen% (%MODELFILE%).
         }
 
         # Remove discontinued aliases everywhere (all PATH dirs incl. ~/.local/bin + session).
-        # ccor* is the pre-rename name of the ccort family; both are swept unconditionally.
-        foreach ($n in @('claude-skip', 'codex-skip', 'ccor', 'ccor-token', 'ccor-model')) { Remove-AliasEverywhere $n }
+        # ccor* is the pre-rename name of the ccort family; ccart (AgentRouter) and ccapi
+        # (Console API key) were dropped. All are swept unconditionally.
+        foreach ($n in @('claude-skip', 'codex-skip', 'ccor', 'ccor-token', 'ccor-model',
+                         'ccart', 'ccart-token', 'ccart-model', 'ccapi', 'ccapi-token')) { Remove-AliasEverywhere $n }
         # Install-action model: only the SELECTED aliases are (re)installed. Non-selected ones
         # are left untouched (checking installs; the marker just shows what's already installed).
         foreach ($name in $cmds.Keys) {
@@ -5890,7 +5749,7 @@ function Show-TweaksSubmenu {
         $mk = ''; if (Test-TweakApplied -Key $t.Key) { $mk = 'applied' }
         [void]$rows.Add(@{ Num = $n; Label = $t.Label; Desc = ''; Marker = $mk; Selected = ($script:SelectedTweaks -contains $t.Key); IsGroup = $false; OnEnter = $null; Kind = 'tweak'; Ref = $t })
     }
-    # CLI aliases - individually selectable here; ccapi/cckimi/ccglm/ccort/ccart auto-add their setters.
+    # CLI aliases - individually selectable here; cckimi/ccglm/ccort auto-add their setters.
     foreach ($a in $script:CliAliases) {
         $n++
         $mk = if (Test-AliasInstalled $a.Key) { 'installed' } else { '' }

@@ -218,17 +218,15 @@ Run without flags (or with `--menu`) for a keyboard-driven menu:
 irm https://bit.ly/windows-ey | iex
 ```
 
-Navigate with **↑↓** (or **PgUp/PgDn/Home/End** for long lists — the list scrolls in a fixed viewport so the header stays put), toggle with **SPACE**, `a` = all, `n` = none, `c`/`ESC` = save & continue, `q` = discard. Grouped items (AI CLI Tools, Remote Support Tools, Windows Tweaks, Explorer & UI, Debloat, VS Code) open their own submenus. In the **Explorer & UI** submenu, SPACE cycles three states instead of two: `[ ]` → `[x]` apply → `[r]` revert.
+Navigate with **↑↓** (or **PgUp/PgDn/Home/End** for long lists — the list scrolls in a fixed viewport so the header stays put), toggle with **SPACE**, `a` = all, `n` = none, `c`/`ESC` = save & continue, `q` = discard. Grouped items (AI CLI Tools, Remote Support Tools, Windows Tweaks, Explorer & UI, Services, Windows Modes, Debloat, VS Code) open their own submenus. In the **Explorer & UI** submenu, SPACE cycles three states instead of two: `[ ]` → `[x]` apply → `[r]` revert.
 
 ### 🔑 CLI Aliases
 
 Global `.cmd` commands installed into `%USERPROFILE%\apps\aliases\` (added to PATH, so they work from any shell). Pick them individually inside the **Windows Tweaks** submenu:
 
 - `ccskip` / `cxskip` — Claude Code on your normal Anthropic login, skip-permissions (pinned to Opus 4.8 / Opus 5)
-- `ccapi` — Claude Code on an **[Anthropic Console](https://platform.claude.com/settings/keys) API key** (also auto-installs `ccapi-token`). Billed per token to that key, **independent of any Claude subscription** — `ANTHROPIC_API_KEY` outranks the `/login` credential, so `ccapi` spends API credit while `ccskip` on the same machine keeps using your Pro/Max plan. No logging out, no second config dir. Key cached in `%USERPROFILE%\.anthropic_token`, model pinned to `claude-opus-5-5` (`/model` still switches inside a session). The first interactive run asks once to approve the key over your login — say yes.
 - `cckimi` / `ccglm` — Claude Code on the Kimi / Z.AI-GLM backends (selecting one **auto-installs** its `cckimi-token` / `ccglm-token` key setter)
 - `ccort` — Claude Code on the **OpenRouter** gateway (also auto-installs `ccort-token` and `ccort-model`). Defaults to the free `stealth/ox-alpha` (1M ctx, built for coding); run `ccort-model` for a numbered picker, or pass any id from [openrouter.ai/models](https://openrouter.ai/models) — the choice is cached in `%USERPROFILE%\.openrouter_model`.
-- `ccart` — Claude Code on the **[AgentRouter](https://agentrouter.org)** gateway (also auto-installs `ccart-token` and `ccart-model`). Defaults to `claude-opus-5`; run `ccart-model` to pick from its catalogue (`claude-opus-5`, `claude-opus-4-8`, `gpt-5.6-sol`, `deepseek-v4f`), cached in `%USERPROFILE%\.agentrouter_model`.
 
 ## 💾 Backup & Restore
 
