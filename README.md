@@ -118,6 +118,7 @@ Everything below is reachable through the interactive menu (`--menu`) or directl
 | Always Show Tray Icons | Show all notification-area icons |
 | Taskbar Tweaks | Taskbar alignment/size adjustments |
 | Taskbar/Start: align left | Move the Start button + taskbar icons to the left (`TaskbarAl=0`) |
+| Taskbar: show labels | Never combine taskbar buttons so window labels stay visible (`TaskbarGlomLevel=2`) — the native core of Windhawk's *taskbar-labels* mod |
 | Taskbar Search: icon only | Show the taskbar search as a compact icon (`SearchboxTaskbarMode=1`) |
 | Disable Windows Search | Stop + disable the `WSearch` indexer service |
 | Disable Windows Updates | Set the `NoAutoUpdate` policy and disable the update services (⚠️ stops security patches) |
@@ -138,6 +139,8 @@ Everything below is reachable through the interactive menu (`--menu`) or directl
 </details>
 
 > Before applying tweaks, the script creates a **System Restore point** and exports the touched registry keys to `%USERPROFILE%\.windows_setup_conf_backup`.
+
+> **Going Windhawk-free:** *Taskbar: show labels* replaces the core of the *taskbar-labels* mod natively. *start-menu-size* is unnecessary on 24H2+ — the Start menu resizes natively by dragging its edges. *taskbar-volume-control* (scroll the taskbar to change volume) has no Windows-native equivalent.
 
 ### 🗂️ Explorer &amp; UI Tweaks (`--uitweaks`)
 

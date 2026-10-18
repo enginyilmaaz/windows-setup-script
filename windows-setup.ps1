@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.9.12'
-$script:SCRIPT_REVISION = '64'
+$script:SCRIPT_VERSION  = '1.9.13'
+$script:SCRIPT_REVISION = '65'
 $script:SCRIPT_DATE     = '2026-10-18'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -635,6 +635,7 @@ $script:WindowsTweaks = @(
     @{ Key='tray-icons';       Label='Always Show All Tray Icons';           Apply='Set-AlwaysShowTrayIcons' }
     @{ Key='taskbar';          Label='Taskbar Tweaks';                       Apply='Set-TaskbarTweaks' }
     @{ Key='taskbar-left';     Label='Taskbar/Start: align left';            Apply='Set-TaskbarAlignLeft' }
+    @{ Key='taskbar-labels';   Label='Taskbar: show labels (never combine)'; Apply='Set-TaskbarLabels' }
     @{ Key='search-icon';      Label='Taskbar Search: icon only';            Apply='Set-SearchBoxIcon' }
     @{ Key='disable-search';   Label='Disable Windows Search (WSearch service)'; Apply='Disable-WindowsSearchService' }
     @{ Key='disable-updates';  Label='Disable Windows Updates';              Apply='Disable-WindowsUpdates' }
@@ -2933,6 +2934,25 @@ function Set-TaskbarAlignLeft {
     }
 }
 
+# Taskbar: never combine buttons, always show window labels (TaskbarGlomLevel:
+# 0=always combine, 1=combine when full, 2=never). Focused single-purpose tweak -
+# the combined Set-TaskbarTweaks forces combining. Native replacement for the
+# core of Windhawk's taskbar-labels mod (label styling stays with the mod).
+function Set-TaskbarLabels {
+    Write-LogInfo "Setting the taskbar to never combine (labels always visible)..."
+    $adv = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
+    try {
+        if (-not (Test-Path -LiteralPath $adv)) { New-Item -Path $adv -Force | Out-Null }
+        New-ItemProperty -LiteralPath $adv -Name 'TaskbarGlomLevel' -Value 2 -PropertyType DWord -Force | Out-Null
+        Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+        Write-LogSuccess "Taskbar labels enabled: never combine (Explorer restarted)."
+        return $true
+    } catch {
+        Write-LogWarning "Could not apply taskbar labels: $($_.Exception.Message)"
+        return $false
+    }
+}
+
 # Taskbar Search: show as a small icon only (SearchboxTaskbarMode: 0=hidden,
 # 1=icon, 2=box, 3=box+label).
 function Set-SearchBoxIcon {
@@ -3321,6 +3341,10 @@ function Test-TweakApplied {
             'taskbar-left' {
                 $v = (Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'TaskbarAl' -ErrorAction SilentlyContinue).TaskbarAl
                 return ($v -eq 0)
+            }
+            'taskbar-labels' {
+                $v = (Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'TaskbarGlomLevel' -ErrorAction SilentlyContinue).TaskbarGlomLevel
+                return ($v -eq 2)
             }
             'search-icon' {
                 $v = (Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Search' -Name 'SearchboxTaskbarMode' -ErrorAction SilentlyContinue).SearchboxTaskbarMode
