@@ -24,9 +24,9 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.9.13'
-$script:SCRIPT_REVISION = '65'
-$script:SCRIPT_DATE     = '2026-10-18'
+$script:SCRIPT_VERSION  = '1.9.14'
+$script:SCRIPT_REVISION = '66'
+$script:SCRIPT_DATE     = '2026-10-19'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
 $script:SELF_URL = 'https://bit.ly/windows-ey'
@@ -69,6 +69,7 @@ $flags = @{
     Remote     = $false
     # windows-native groups (were GNOME tweaks / debloat)
     Tweaks     = $false; Debloat = $false; UiTweaks = $false; Services = $false
+    Windhawk   = $false
     # helpers / special commands
     Login      = $false; SkipUpdate = $false
     ShowBackup = $false; Restore = $false
@@ -143,6 +144,8 @@ foreach ($arg in $script:RAW_ARGS) {
         'regtweaks'   { $flags.UiTweaks = $true }
         'reg-tweaks'  { $flags.UiTweaks = $true }
         'services'    { $flags.Services = $true }
+        'windhawk'    { $flags.Windhawk = $true }
+        'windhawk-mods' { $flags.Windhawk = $true }
         'svc'         { $flags.Services = $true }
         # helpers / special
         'login'       { $flags.Login = $true }
@@ -555,6 +558,7 @@ WINDOWS TWEAKS / DEBLOAT:
                      applied [x] or reverted [r] from the submenu)
   --debloat         Remove pre-installed Windows bloat (submenu)
   --services        Disable / re-enable safe Windows services (submenu; alias --svc)
+  --windhawk        Windhawk + taskbar mods with preset settings (submenu; alias --windhawk-mods)
 
 HELPERS:
   --login           CLI login helpers
@@ -644,7 +648,6 @@ $script:WindowsTweaks = @(
     @{ Key='vmware-setup';     Label='VMware/VirtualBox setup (off: Hyper-V+VBS+Mem Integrity+Cred Guard)'; Apply='Set-VMwareHypervisor' }
     @{ Key='error-reporting';  Label='Activate Error Reporting';             Apply='Enable-WindowsErrorReporting' }
     @{ Key='enable-restore';   Label='Enable System Restore';                Apply='Enable-SystemRestore' }
-    @{ Key='windhawk';         Label='Install Windhawk + taskbar mods (2.0-alpha)'; Apply='Install-Windhawk' }
     @{ Key='camera';           Label='Install Camera App';                   Apply='Install-CameraApp' }
     @{ Key='install-webview2'; Label='Install: Edge WebView2 Runtime';       Apply='Install-EdgeWebView2' }
     @{ Key='install-edge';     Label='Install: Microsoft Edge';              Apply='Install-EdgeBrowser' }
@@ -3165,40 +3168,78 @@ function Enable-StorageSense {
     }
 }
 
-# Install Windhawk + three taskbar mods. Uses the latest GitHub release (2.0+),
-# which ships windhawk-cli.exe - the winget build (1.7.x stable) has no CLI, so we
-# can't drive mods from it. The script is already elevated, so the CLI calls need
-# no extra UAC. taskbar-grouping is installed with its defaults (leave groups to
-# configure in the UI); start-menu-size and taskbar-volume-control get preset.
-function Install-Windhawk {
-    $cli = 'C:\Program Files\Windhawk\windhawk-cli.exe'
-    if (-not (Test-Path $cli)) {
-        Write-LogInfo "Installing Windhawk (latest release with the CLI)..."
-        try {
-            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
-            $rel = Invoke-RestMethod 'https://api.github.com/repos/ramensoftware/windhawk/releases?per_page=1' -Headers @{ 'User-Agent' = 'windows-setup' }
-            $asset = $rel[0].assets | Where-Object { $_.name -eq 'windhawk_setup.exe' } | Select-Object -First 1
-            if (-not $asset) { throw 'setup asset not found' }
-            $f = Get-FileDownload -Url $asset.browser_download_url
-            if (-not $f) { throw 'download failed' }
-            Write-LogInfo "  Installing $($rel[0].tag_name) silently (also fetches its compiler; give it a minute)..."
-            Start-Process -FilePath $f -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/FORCECLOSEAPPLICATIONS' -Wait
-        } catch {
-            Write-LogWarning "Could not install Windhawk: $($_.Exception.Message)"
-            return $false
-        }
-    }
-    for ($i = 0; $i -lt 30 -and -not (Test-Path $cli); $i++) { Start-Sleep -Seconds 2 }
-    if (-not (Test-Path $cli)) { Write-LogWarning "Windhawk installed but windhawk-cli.exe not found (needs a 2.0+ release)."; return $false }
+# Windhawk Mods - Windhawk itself plus the taskbar mods, each preset with the
+# settings from the home machine. Windhawk comes from the latest GitHub release
+# (2.0+), which ships windhawk-cli.exe - the winget build (1.7.x stable) has no
+# CLI, so we can't drive mods from it. The script is already elevated, so the
+# CLI calls need no extra UAC. Mods depend on Windhawk: the submenu enforces
+# that Windhawk is selected whenever any mod is (see Show-WindhawkSubmenu).
+$script:WINDHAWK_CLI = 'C:\Program Files\Windhawk\windhawk-cli.exe'
 
-    Write-LogInfo "  Installing taskbar mods (each compiles locally; please wait)..."
-    foreach ($m in 'taskbar-grouping', 'start-menu-size', 'taskbar-volume-control') {
-        & $cli mod install $m --quiet 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) { Write-LogInfo "  installed: $m" } else { Write-LogWarning "  mod install '$m' failed (exit $LASTEXITCODE)" }
+function Test-WindhawkInstalled { Test-App -Command 'windhawk' -DisplayNameLike '*Windhawk*' }
+
+# A mod counts as installed when the engine knows it (HKLM\...\Windhawk\Engine\Mods\<id>).
+function Test-WindhawkModInstalled {
+    param([Parameter(Mandatory)][string]$Id)
+    return (Test-Path -LiteralPath "HKLM:\SOFTWARE\Windhawk\Engine\Mods\$Id")
+}
+
+$script:WindhawkMods = @(
+    @{ Id='taskbar-labels';         Label='taskbar-labels - show labels on taskbar buttons' }
+    @{ Id='start-menu-size';        Label='start-menu-size - Start menu at 750x750' }
+    @{ Id='taskbar-volume-control'; Label='taskbar-volume-control - scroll the taskbar to change volume' }
+)
+
+# Per-mod settings (windhawk-cli "mod settings set" pairs), mirroring the home
+# machine's HKLM\...\Engine\Mods\<id>\Settings. Only non-default values are listed.
+$script:WindhawkModSettings = @{
+    'taskbar-labels'         = @(
+        'mode=noLabelsWithoutCombining',
+        'taskbarItemWidth=160',
+        'minimumTaskbarItemWidth=50',
+        'maximumTaskbarItemWidth=176',
+        'runningIndicatorStyle=centerFixed',
+        'progressIndicatorStyle=sameAsRunningIndicatorStyle',
+        'fontSize=12',
+        'textTrimming=characterEllipsis',
+        'leftAndRightPaddingSize=8',
+        'spaceBetweenIconAndLabel=8',
+        'labelForSingleItem=%name%',
+        'labelForMultipleItems=[%amount%] %name%'
+    )
+    'start-menu-size'        = @( 'width=750', 'height=750', 'searchWidth=0', 'searchHeight=0' )
+    'taskbar-volume-control' = @(
+        'volumeIndicator=win11',
+        'scrollArea=taskbar',
+        'volumeChangeStep=2',
+        'middleClickToMute=0',
+        'ctrlScrollVolumeChange=0',
+        'noAutomaticMuteToggle=0',
+        'oldTaskbarOnWin11=0'
+    )
+}
+
+function Install-WindhawkApp {
+    if (Test-Path $script:WINDHAWK_CLI) { return $true }
+    Write-LogInfo "Installing Windhawk (latest release with the CLI)..."
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
+        $rel = Invoke-RestMethod 'https://api.github.com/repos/ramensoftware/windhawk/releases?per_page=1' -Headers @{ 'User-Agent' = 'windows-setup' }
+        $asset = $rel[0].assets | Where-Object { $_.name -eq 'windhawk_setup.exe' } | Select-Object -First 1
+        if (-not $asset) { throw 'setup asset not found' }
+        $f = Get-FileDownload -Url $asset.browser_download_url
+        if (-not $f) { throw 'download failed' }
+        Write-LogInfo "  Installing $($rel[0].tag_name) silently (also fetches its compiler; give it a minute)..."
+        Start-Process -FilePath $f -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/FORCECLOSEAPPLICATIONS' -Wait
+    } catch {
+        Write-LogWarning "Could not install Windhawk: $($_.Exception.Message)"
+        return $false
     }
-    & $cli mod settings set start-menu-size width=750 height=750 searchWidth=0 searchHeight=0 2>&1 | Out-Null
-    & $cli mod settings set taskbar-volume-control volumeIndicator=modern scrollArea=taskbar middleClickToMute=0 ctrlScrollVolumeChange=0 noAutomaticMuteToggle=0 volumeChangeStep=2 oldTaskbarOnWin11=0 2>&1 | Out-Null
-    Write-LogSuccess "Windhawk + taskbar mods installed (taskbar-grouping left at defaults)."
+    for ($i = 0; $i -lt 30 -and -not (Test-Path $script:WINDHAWK_CLI); $i++) { Start-Sleep -Seconds 2 }
+    if (-not (Test-Path $script:WINDHAWK_CLI)) {
+        Write-LogWarning "Windhawk installed but windhawk-cli.exe not found (needs a 2.0+ release)."
+        return $false
+    }
     return $true
 }
 
@@ -3380,9 +3421,6 @@ function Test-TweakApplied {
                 if ($pol -eq 1) { return $false }
                 $v = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore' -Name 'RPSessionInterval' -ErrorAction SilentlyContinue).RPSessionInterval
                 return ($v -eq 1)
-            }
-            'windhawk' {
-                return (Test-App -Command 'windhawk' -DisplayNameLike '*Windhawk*')
             }
             'camera' {
                 return [bool](Get-AppxPackage -Name 'Microsoft.WindowsCamera' -ErrorAction SilentlyContinue)
@@ -5429,6 +5467,7 @@ $script:SelectedVSCodeExt   = @()
 # key -> 'apply' | 'revert'.
 $script:SelectedUiTweaks    = @{}
 $script:SelectedServices    = @{}
+$script:SelectedWindhawkMods = @()
 $script:SelectedAliases     = @()
 $script:AliasesTouched      = $false
 $script:VSCodeApplySettings = $true
@@ -5869,6 +5908,44 @@ function Show-VSCodeSubmenu {
 #-------------------------------------------------------------------------------
 # Main interactive menu (birebir: one flat numbered list, groups expand on ENTER)
 #-------------------------------------------------------------------------------
+# Windhawk Mods submenu: row 1 is Windhawk, the rest are the mods with their
+# preset settings. Mods depend on Windhawk - the constraint is applied when the
+# menu closes (the engine has no per-toggle hook): any selected mod forces the
+# Windhawk row on, and unchecking Windhawk drops every mod. The live summary
+# line says so while you're still in the menu.
+function Show-WindhawkSubmenu {
+    $wasApp = [bool]$flags.Windhawk
+    $rows = New-Object System.Collections.ArrayList
+    $mk = ''; if (Test-WindhawkInstalled) { $mk = 'installed' }
+    [void]$rows.Add(@{ Num=1; Label='Windhawk (2.0+ with the CLI)'; Desc='required by every mod below'; Marker=$mk; Selected=$wasApp; IsGroup=$false; OnEnter=$null; Kind='app' })
+    $n = 1
+    foreach ($m in $script:WindhawkMods) {
+        $n++
+        $mk = ''; if (Test-WindhawkModInstalled -Id $m.Id) { $mk = 'installed' }
+        [void]$rows.Add(@{ Num=$n; Label=$m.Label; Desc=''; Marker=$mk; Selected=($script:SelectedWindhawkMods -contains $m.Id); IsGroup=$false; OnEnter=$null; Kind='mod'; Ref=$m })
+    }
+    $script:_WhRows = $rows; $script:_WhWasApp = $wasApp
+    $summary = {
+        $app = [bool]($script:_WhRows | Where-Object { $_.Kind -eq 'app' } | Select-Object -First 1).Selected
+        $modCount = @($script:_WhRows | Where-Object { $_.Kind -eq 'mod' -and $_.Selected }).Count
+        if ($modCount -gt 0 -and -not $app) {
+            if ($script:_WhWasApp) { return "Windhawk unchecked - the $modCount selected mod(s) will be dropped" }
+            return "Windhawk will be auto-checked (mods depend on it): $modCount mod(s)"
+        }
+        if ($app) { return "Selected: Windhawk + $modCount mod(s)" }
+        return 'Selected: none'
+    }
+    [void](Invoke-SelectMenu -Banner 'Windhawk Mods    (mods require Windhawk)' -Rows $rows -Summary $summary -SubMenu)
+    $app = [bool]($rows | Where-Object { $_.Kind -eq 'app' } | Select-Object -First 1).Selected
+    $mods = @($rows | Where-Object { $_.Kind -eq 'mod' -and $_.Selected } | ForEach-Object { $_.Ref.Id })
+    # Dependency rules, resolved by intent: unchecking a previously-checked
+    # Windhawk drops the mods; otherwise any selected mod forces Windhawk on.
+    if ($wasApp -and -not $app) { $mods = @() }
+    elseif ($mods.Count -gt 0) { $app = $true }
+    $script:SelectedWindhawkMods = $mods
+    $flags.Windhawk = $app
+}
+
 function Show-InteractiveMenu {
     Reset-DetectionCache
     Write-Host ""
@@ -5883,6 +5960,8 @@ function Show-InteractiveMenu {
     $twInst = @($script:WindowsTweaks| Where-Object { Test-TweakApplied -Key $_.Key }).Count
     $uiInst = @($script:UiTweaks     | Where-Object { Test-UiTweakApplied -Key $_.Key }).Count
     $svcInst = @($script:ServiceItems | Where-Object { Test-ServiceDisabled -Item $_ }).Count
+    $whInst = 0; if (Test-WindhawkInstalled) { $whInst = 1 }
+    $whInst += @($script:WindhawkMods | Where-Object { Test-WindhawkModInstalled -Id $_.Id }).Count
     $dbInst = @($script:DebloatItems | Where-Object { Test-BloatRemoved -Item $_ }).Count
     $vsInst = if (Test-VSCodeInstalled) { 'installed' } else { '' }
     Stop-Spinner $sp
@@ -5906,6 +5985,7 @@ function Show-InteractiveMenu {
         @{ k='winrar';                        label='WinRAR';       desc='WinRAR archiver' }
         @{ k='spotify';                       label='Spotify';      desc='Spotify (Microsoft Store)' }
         @{ k='power-manager';                 label='Power Manager';desc='Windows Auto Power Manager (latest release)' }
+        @{ k='windhawk';     group='windhawk';label='Windhawk Mods'; desc='Windhawk + taskbar mods, preset settings (Enter to expand)'; marker=(Get-GroupMarkerText $whInst ($script:WindhawkMods.Count + 1) 'installed') }
         @{ k='revo';                          label='Revo Pro';     desc='Revo Uninstaller Pro' }
         @{ k='cloudflared';                   label='Cloudflared';  desc='Cloudflare Tunnel client' }
         @{ k='docker';                        label='Docker';       desc='Docker Desktop' }
@@ -5930,6 +6010,7 @@ function Show-InteractiveMenu {
                 'tweaks'  { { Show-TweaksSubmenu } }
                 'uitweaks'{ { Show-UiTweaksSubmenu } }
                 'services'{ { Show-ServicesSubmenu } }
+                'windhawk'{ { Show-WindhawkSubmenu } }
                 'aicli'   { { Show-AiCliSubmenu } }
                 'debloat' { { Show-DebloatSubmenu } }
             }
@@ -5939,6 +6020,7 @@ function Show-InteractiveMenu {
                 'tweaks'  { { $script:SelectedTweaks.Count -gt 0 -or $script:SelectedAliases.Count -gt 0 } }
                 'uitweaks'{ { $script:SelectedUiTweaks.Count -gt 0 } }
                 'services'{ { $script:SelectedServices.Count -gt 0 } }
+                'windhawk'{ { $flags.Windhawk } }
                 'aicli'   { { @($script:AiCliTools | Where-Object { $flags[$_.Flag] }).Count -gt 0 } }
                 'debloat' { { $script:SelectedDebloat.Count -gt 0 } }
             }
@@ -5959,6 +6041,7 @@ function Show-InteractiveMenu {
         if ($script:SelectedTweaks.Count)  { $parts += "Tweaks[$($script:SelectedTweaks.Count)]" }
         if ($script:SelectedUiTweaks.Count) { $parts += "UI[$($script:SelectedUiTweaks.Count)]" }
         if ($script:SelectedServices.Count) { $parts += "Svc[$($script:SelectedServices.Count)]" }
+        if ($flags.Windhawk) { $parts += "Windhawk[$(@($script:SelectedWindhawkMods).Count)]" }
         if ($script:SelectedDebloat.Count) { $parts += "Debloat[$($script:SelectedDebloat.Count)]" }
         if ($script:SelectedAliases.Count) { $parts += "Aliases[$($script:SelectedAliases.Count)]" }
         if ($flags.VSCode) { $parts += 'VSCode' }
@@ -5987,6 +6070,7 @@ function Show-InteractiveMenu {
         $script:SelectedAliases = @(); $script:AliasesTouched = $true
         $script:SelectedUiTweaks = @{}
         $script:SelectedServices = @{}
+        $script:SelectedWindhawkMods = @(); $flags.Windhawk = $false
         $flags.Tweaks = $false; $flags.Debloat = $false; $flags.VSCode = $false; $flags.UiTweaks = $false; $flags.Services = $false
     }
 
@@ -6082,6 +6166,44 @@ function Invoke-UiTweaks {
     }
 }
 
+function Invoke-Windhawk {
+    # CLI path: --windhawk with no mods picked and Windhawk not on the machine
+    # yet -> open the submenu to choose (an installed Windhawk means app-only).
+    if (@($script:SelectedWindhawkMods).Count -eq 0 -and -not (Test-WindhawkInstalled)) { Show-WindhawkSubmenu }
+    if (-not $flags.Windhawk) { return }
+
+    Write-LogStep "Setting up Windhawk mods"
+    if (-not (Install-WindhawkApp)) {
+        Write-LogWarning "Skipping Windhawk mods - the app could not be installed."
+        Add-Summary 'Windhawk' $false
+        return
+    }
+    Add-Summary 'Windhawk'
+    if (-not $script:SelectedWindhawkMods -or $script:SelectedWindhawkMods.Count -eq 0) { return }
+
+    Write-LogInfo "  Installing taskbar mods (each compiles locally; please wait)..."
+    foreach ($id in $script:SelectedWindhawkMods) {
+        if (-not (Test-WindhawkModInstalled -Id $id)) {
+            & $script:WINDHAWK_CLI mod install $id --quiet 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-LogInfo "  installed: $id"
+            } else {
+                Write-LogWarning "  mod install '$id' failed (exit $LASTEXITCODE)"
+                Add-Summary "Windhawk mod: $id" $false
+                continue
+            }
+        }
+        $pairs = $script:WindhawkModSettings[$id]
+        if ($pairs) {
+            & $script:WINDHAWK_CLI mod settings set $id @pairs 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) { Write-LogInfo "  settings applied: $id" }
+            else { Write-LogWarning "  settings for '$id' failed (exit $LASTEXITCODE)" }
+        }
+        Add-Summary "Windhawk mod: $id"
+    }
+    Write-LogSuccess "Windhawk mods done."
+}
+
 function Invoke-Services {
     if (-not $script:SelectedServices -or $script:SelectedServices.Count -eq 0) { Show-ServicesSubmenu }
     if (-not $script:SelectedServices -or $script:SelectedServices.Count -eq 0) { return }
@@ -6138,6 +6260,9 @@ function Invoke-Installations {
     if ($flags.Tweaks)   { Invoke-Tweaks }
     if ($flags.UiTweaks) { Invoke-UiTweaks }
     if ($flags.Services) { Invoke-Services }
+    # Deliberately not part of select-all: Windhawk 2.0 is alpha software and the
+    # mods change the taskbar - opting in should be an explicit choice.
+    if ($flags.Windhawk) { Invoke-Windhawk }
     if ($flags.Debloat) {
         if (-not $script:SelectedDebloat -or $script:SelectedDebloat.Count -eq 0) { Show-DebloatSubmenu }
         Invoke-Debloat

@@ -127,7 +127,6 @@ Everything below is reachable through the interactive menu (`--menu`) or directl
 | VMware/VirtualBox setup | Disable Hyper-V **+** VBS **+** Memory Integrity (HVCI) **+** Credential Guard so VMware/VirtualBox get full VT-x (⚠️ weakens Win11 security; reboot) |
 | Activate Error Reporting | Enable Windows Error Reporting |
 | Enable System Restore | Turn on system protection for the system drive (shadow storage capped at 10GB) |
-| Install Windhawk + taskbar mods | Install Windhawk (latest GitHub release, 2.0+, which ships `windhawk-cli.exe`) and the `taskbar-grouping`, `start-menu-size`, and `taskbar-volume-control` mods via the CLI (runs under the script's own elevation — no extra UAC) |
 | Install Camera App | Install the Windows Camera app |
 | Install: Edge WebView2 Runtime | (Re)install `Microsoft.EdgeWebView2Runtime` via winget |
 | Install: Microsoft Edge | (Re)install `Microsoft.Edge` via winget |
@@ -209,6 +208,10 @@ Remove pre-installed Windows apps and (optionally) the dev tools/browsers this s
 
 Tri-state submenu (`[x]` = disable, `[r]` = re-enable to the default start type) for ~47 Windows services that are **safe to turn off** — disabling one only stops that feature, never core networking / audio / notifications / time / MS-account. Grouped: telemetry & diagnostics, security/legacy, Xbox, print/scan/fax, and sensors/biometric/location/payments. Core services (networking, audio, updates, connected-devices, per-user `_LUID` services) are deliberately **not** listed. Edit `$script:ServiceItems` to customise. Nothing here is selected by `a` (all).
 
+### 🦅 Windhawk Mods (`--windhawk`)
+
+Submenu with **Windhawk** on row 1 and the taskbar mods below it: `taskbar-labels`, `start-menu-size`, `taskbar-volume-control` — each preset with the settings from the home machine (labels without combining at 160px, Start at 750×750, taskbar-scroll volume). Mods depend on Windhawk: **checking any mod auto-checks Windhawk; unchecking Windhawk drops every mod** (enforced when the menu closes, and the summary line says so while you're in it). Installs the latest GitHub release (2.0+, which ships `windhawk-cli.exe` — the winget 1.7.x stable has no CLI) and drives the mods through it under the script's own elevation, no extra UAC. Not part of `a` (all), since Windhawk 2.0 is alpha software.
+
 ## 🎛️ Interactive Menu
 
 Run without flags (or with `--menu`) for a keyboard-driven menu:
@@ -217,7 +220,7 @@ Run without flags (or with `--menu`) for a keyboard-driven menu:
 irm https://bit.ly/windows-ey | iex
 ```
 
-Navigate with **↑↓** (or **PgUp/PgDn/Home/End** for long lists — the list scrolls in a fixed viewport so the header stays put), toggle with **SPACE**, `a` = all, `n` = none, `c`/`ESC` = save & continue, `q` = discard. Grouped items (AI CLI Tools, Remote Support Tools, Windows Tweaks, Explorer & UI, Services, Windows Modes, Debloat, VS Code) open their own submenus. In the **Explorer & UI** submenu, SPACE cycles three states instead of two: `[ ]` → `[x]` apply → `[r]` revert.
+Navigate with **↑↓** (or **PgUp/PgDn/Home/End** for long lists — the list scrolls in a fixed viewport so the header stays put), toggle with **SPACE**, `a` = all, `n` = none, `c`/`ESC` = save & continue, `q` = discard. Grouped items (AI CLI Tools, Remote Support Tools, Windows Tweaks, Explorer & UI, Services, Windhawk Mods, Debloat, VS Code) open their own submenus. In the **Explorer & UI** submenu, SPACE cycles three states instead of two: `[ ]` → `[x]` apply → `[r]` revert.
 
 ### 🔑 CLI Aliases
 
