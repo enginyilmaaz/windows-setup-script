@@ -171,7 +171,7 @@ Every entry is a **two-way toggle**. In the submenu, **SPACE** cycles each row `
 | Search box | Disable web suggestions | Re-enable |
 | Search web results | Turn off Bing/web **and Store-app** results in Start search — also flips the *Show suggested search results* switches (Web + Microsoft Store, `IsStoreSuggestionsEnabled` / `IsWebSuggestionsEnabled`), which is what actually kills the "get it from the Microsoft Store" app rows; local search stays | Re-enable |
 | NumLock | On at the logon screen **and** after sign-in | Off |
-| PrintScreen key | Unbind it from the Windows screen-clip overlay (`PrintScreenKeyForSnippingTool=0`) so the key falls through to ShareX etc. | Rebind it to the overlay |
+| PrintScreen key | Unbind it from the Windows screen-clip overlay (`PrintScreenKeyForSnippingEnabled=0` + Explorer restart) so the key falls through to ShareX etc. — restart that app afterwards so it can claim the key | Rebind it to the overlay |
 | Superfetch / Prefetch | Stop + disable `SysMain`, `EnablePrefetcher=0`, clear the Prefetch cache | Re-enable (`start=auto`, `EnablePrefetcher=3`) |
 | Windows Photo Viewer | Re-register it for `.tif .tiff .png .bmp .jpeg .jpg .ico` | Unregister |
 | Rebuild icon cache | One-shot: `ie4uinit -show`, drop `IconCache.db`, restart Explorer | — |

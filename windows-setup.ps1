@@ -24,8 +24,8 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.9.15'
-$script:SCRIPT_REVISION = '67'
+$script:SCRIPT_VERSION  = '1.9.16'
+$script:SCRIPT_REVISION = '68'
 $script:SCRIPT_DATE     = '2026-10-25'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
@@ -4086,24 +4086,34 @@ function Disable-NumLockAtBoot {
 # The overlay is ScreenClippingHost.exe, shipped INSIDE MicrosoftWindows.Client.Core
 # (same package as Start menu / taskbar / Explorer), so it cannot be removed - the
 # debloat 'snippingtool' entry only drops the separate Snipping Tool editor app.
-# Only the key binding is configurable: 0 hands PrintScreen back to whatever app
-# grabs it (ShareX etc). Win+Shift+S still opens it - Windows does not expose it.
+# Only the key binding is configurable, and the value name below is the one
+# twinui.pcshell.dll - the shell component that claims the key - actually reads.
+# ('PrintScreenKeyForSnippingTool', widely repeated online, appears in no binary
+# and does nothing.) The shell caches it, hence the Explorer restart; an app that
+# wants the key (ShareX etc) must be restarted afterwards to claim it, and until
+# something claims it the key does nothing. Win+Shift+S still opens the overlay -
+# Windows does not expose that shortcut.
 #-------------------------------------------------------------------------------
 $script:PRINTSCREEN_SNIP_KEY = 'HKCU\Control Panel\Keyboard'
 
 function Disable-PrintScreenSnip {
     Write-LogInfo "Unbinding PrintScreen from the Windows screen-clip overlay..."
-    $ok = Set-UiRegValue -RegPath $script:PRINTSCREEN_SNIP_KEY -Name 'PrintScreenKeyForSnippingTool' -Value 0
+    $ok = Set-UiRegValue -RegPath $script:PRINTSCREEN_SNIP_KEY -Name 'PrintScreenKeyForSnippingEnabled' -Value 0
     if ($ok) {
+        Restart-Explorer
         Write-LogSuccess "PrintScreen no longer opens the screen-clip overlay."
+        Write-LogInfo "Restart the app that should take the key (ShareX etc) so it can claim it."
         Write-LogInfo "Win+Shift+S still opens it - Windows does not expose that shortcut."
     }
     return $ok
 }
 function Enable-PrintScreenSnip {
     Write-LogInfo "Rebinding PrintScreen to the Windows screen-clip overlay..."
-    $ok = Set-UiRegValue -RegPath $script:PRINTSCREEN_SNIP_KEY -Name 'PrintScreenKeyForSnippingTool' -Value 1
-    if ($ok) { Write-LogSuccess "PrintScreen opens the screen-clip overlay again." }
+    $ok = Set-UiRegValue -RegPath $script:PRINTSCREEN_SNIP_KEY -Name 'PrintScreenKeyForSnippingEnabled' -Value 1
+    if ($ok) {
+        Restart-Explorer
+        Write-LogSuccess "PrintScreen opens the screen-clip overlay again."
+    }
     return $ok
 }
 
@@ -4306,7 +4316,7 @@ function Test-UiTweakApplied {
                 return ([string]$v -eq '2')
             }
             'printscreen-snip' {
-                $v = Get-UiRegValue -RegPath $script:PRINTSCREEN_SNIP_KEY -Name 'PrintScreenKeyForSnippingTool'
+                $v = Get-UiRegValue -RegPath $script:PRINTSCREEN_SNIP_KEY -Name 'PrintScreenKeyForSnippingEnabled'
                 return ($null -ne $v -and [int]$v -eq 0)
             }
             'superfetch' {
