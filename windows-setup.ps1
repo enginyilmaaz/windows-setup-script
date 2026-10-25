@@ -24,9 +24,9 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.9.14'
-$script:SCRIPT_REVISION = '66'
-$script:SCRIPT_DATE     = '2026-10-19'
+$script:SCRIPT_VERSION  = '1.9.15'
+$script:SCRIPT_REVISION = '67'
+$script:SCRIPT_DATE     = '2026-10-25'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
 $script:SELF_URL = 'https://bit.ly/windows-ey'
@@ -682,6 +682,7 @@ $script:UiTweaks = @(
     @{ Key='search-suggestions'; Label='Disable search box web suggestions';           Apply='Disable-SearchBoxSuggestions'; Revert='Enable-SearchBoxSuggestions' }
     @{ Key='search-web';         Label='Search: disable web / Bing / Store-app results in Start'; Apply='Disable-SearchWebResults';     Revert='Enable-SearchWebResults' }
     @{ Key='numlock';            Label='NumLock on at boot';                           Apply='Enable-NumLockAtBoot';         Revert='Disable-NumLockAtBoot' }
+    @{ Key='printscreen-snip';   Label='PrintScreen: unbind the screen-clip overlay';  Apply='Disable-PrintScreenSnip';      Revert='Enable-PrintScreenSnip' }
     @{ Key='superfetch';         Label='Disable Superfetch (SysMain) + Prefetch';      Apply='Disable-SuperfetchPrefetch';   Revert='Enable-SuperfetchPrefetch' }
     @{ Key='photo-viewer';       Label='Restore the classic Windows Photo Viewer';     Apply='Restore-WindowsPhotoViewer';   Revert='Remove-WindowsPhotoViewer' }
     @{ Key='icon-cache';         Label='Rebuild the icon cache (one-shot)';            Apply='Reset-IconCache';              Revert=$null }
@@ -2040,6 +2041,7 @@ $script:TWEAK_REG_KEYS = @(
     'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\DelegateFolders', # nav pane: removable drives
     'HKLM\SOFTWARE\Microsoft\Windows Photo Viewer\Capabilities\FileAssociations',                # classic Photo Viewer
     'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters',# prefetch
+    'HKCU\Control Panel\Keyboard',                                      # NumLock (user) + PrintScreen key binding
     'HKU\.DEFAULT\Control Panel\Keyboard'                               # NumLock at the logon screen
 )
 
@@ -4080,6 +4082,32 @@ function Disable-NumLockAtBoot {
 }
 
 #-------------------------------------------------------------------------------
+# PrintScreen -> Windows screen-clip overlay.
+# The overlay is ScreenClippingHost.exe, shipped INSIDE MicrosoftWindows.Client.Core
+# (same package as Start menu / taskbar / Explorer), so it cannot be removed - the
+# debloat 'snippingtool' entry only drops the separate Snipping Tool editor app.
+# Only the key binding is configurable: 0 hands PrintScreen back to whatever app
+# grabs it (ShareX etc). Win+Shift+S still opens it - Windows does not expose it.
+#-------------------------------------------------------------------------------
+$script:PRINTSCREEN_SNIP_KEY = 'HKCU\Control Panel\Keyboard'
+
+function Disable-PrintScreenSnip {
+    Write-LogInfo "Unbinding PrintScreen from the Windows screen-clip overlay..."
+    $ok = Set-UiRegValue -RegPath $script:PRINTSCREEN_SNIP_KEY -Name 'PrintScreenKeyForSnippingTool' -Value 0
+    if ($ok) {
+        Write-LogSuccess "PrintScreen no longer opens the screen-clip overlay."
+        Write-LogInfo "Win+Shift+S still opens it - Windows does not expose that shortcut."
+    }
+    return $ok
+}
+function Enable-PrintScreenSnip {
+    Write-LogInfo "Rebinding PrintScreen to the Windows screen-clip overlay..."
+    $ok = Set-UiRegValue -RegPath $script:PRINTSCREEN_SNIP_KEY -Name 'PrintScreenKeyForSnippingTool' -Value 1
+    if ($ok) { Write-LogSuccess "PrintScreen opens the screen-clip overlay again." }
+    return $ok
+}
+
+#-------------------------------------------------------------------------------
 # Superfetch (SysMain) + Prefetch
 #-------------------------------------------------------------------------------
 $script:PREFETCH_KEY = 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters'
@@ -4276,6 +4304,10 @@ function Test-UiTweakApplied {
             'numlock' {
                 $v = Get-UiRegValue -RegPath $script:NUMLOCK_KEY_DEFAULT -Name 'InitialKeyboardIndicators'
                 return ([string]$v -eq '2')
+            }
+            'printscreen-snip' {
+                $v = Get-UiRegValue -RegPath $script:PRINTSCREEN_SNIP_KEY -Name 'PrintScreenKeyForSnippingTool'
+                return ($null -ne $v -and [int]$v -eq 0)
             }
             'superfetch' {
                 $v = Get-UiRegValue -RegPath $script:PREFETCH_KEY -Name 'EnablePrefetcher'
