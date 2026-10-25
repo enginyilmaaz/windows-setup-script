@@ -227,7 +227,7 @@ Navigate with **↑↓** (or **PgUp/PgDn/Home/End** for long lists — the list 
 
 Global `.cmd` commands installed into `%USERPROFILE%\apps\aliases\` (added to PATH, so they work from any shell). Pick them individually inside the **Windows Tweaks** submenu:
 
-- `ccskip` / `cxskip` — Claude Code on your normal Anthropic login, skip-permissions (pinned to Opus 4.8 / Opus 5)
+- `ccskip` / `cxskip` — Claude Code on your normal Anthropic login, skip-permissions (pinned to Opus 5.5)
 - `cckimi` / `ccglm` — Claude Code on the Kimi / Z.AI-GLM backends (selecting one **auto-installs** its `cckimi-token` / `ccglm-token` key setter)
 - `ccort` — Claude Code on the **OpenRouter** gateway (also auto-installs `ccort-token` and `ccort-model`). Defaults to the free `stealth/ox-alpha` (1M ctx, built for coding); run `ccort-model` for a numbered picker, or pass any id from [openrouter.ai/models](https://openrouter.ai/models) — the choice is cached in `%USERPROFILE%\.openrouter_model`.
 

@@ -785,8 +785,8 @@ function Enable-ServiceItem {
 # CLI aliases (own submenu group). cckimi/ccglm/ccort auto-bundle their *-token setter
 # (and, for the gateways, their *-model picker).
 $script:CliAliases = @(
-    @{ Key='ccskip'; Label='ccskip  (Claude skip-permissions, Opus 4.8)' }
-    @{ Key='cxskip'; Label='cxskip  (Claude skip-permissions, Opus 5)' }
+    @{ Key='ccskip'; Label='ccskip  (Claude skip-permissions, Opus 5.5)' }
+    @{ Key='cxskip'; Label='cxskip  (Claude skip-permissions, Opus 5.5)' }
     @{ Key='cckimi'; Label='cckimi  (Claude Code on the Kimi backend)  [+ cckimi-token]' }
     @{ Key='ccglm';  Label='ccglm   (Claude Code on the Z.AI GLM backend)  [+ ccglm-token]' }
     @{ Key='ccort';   Label='ccort    (Claude Code on OpenRouter, stealth/ox-alpha)  [+ ccort-token, ccort-model]' }
@@ -2436,11 +2436,11 @@ function Set-CliAliases {
         $cmds = [ordered]@{}
         $cmds['ccskip'] = @'
 @echo off
-call claude --dangerously-skip-permissions --effort max --model claude-opus-4-8 %*
+call claude --dangerously-skip-permissions --effort max --model claude-opus-5-5 %*
 '@
         $cmds['cxskip'] = @'
 @echo off
-call claude --dangerously-skip-permissions --effort max --model claude-opus-5 %*
+call claude --dangerously-skip-permissions --effort max --model claude-opus-5-5 %*
 '@
         $cmds['cckimi'] = @'
 @echo off
@@ -2460,12 +2460,12 @@ echo cckimi: key saved to %TOKENFILE% (current-user only).
 :run
 set "ANTHROPIC_BASE_URL=https://api.kimi.com/coding/"
 set "ANTHROPIC_AUTH_TOKEN=%token%"
-set "ANTHROPIC_MODEL=kimi-k3"
-set "ANTHROPIC_DEFAULT_OPUS_MODEL=kimi-k3"
+set "ANTHROPIC_MODEL=kimi-k3.1-pro[1m]"
+set "ANTHROPIC_DEFAULT_OPUS_MODEL=kimi-k3.1-pro[1m]"
 set "ANTHROPIC_DEFAULT_SONNET_MODEL=kimi-k2.7-code"
 set "ANTHROPIC_DEFAULT_HAIKU_MODEL=kimi-k2.7-code"
-set "ANTHROPIC_DEFAULT_FABLE_MODEL=kimi-k2.7-code-highspeed"
-set "CLAUDE_CODE_SUBAGENT_MODEL=kimi-k3"
+set "ANTHROPIC_DEFAULT_FABLE_MODEL=kimi-k3.1-pro-highspeed[1m]"
+set "CLAUDE_CODE_SUBAGENT_MODEL=kimi-k3.1-pro[1m]"
 set "ENABLE_TOOL_SEARCH=false"
 set "CLAUDE_CODE_AUTO_COMPACT_WINDOW=1048576"
 set "CLAUDE_CODE_EFFORT_LEVEL=max"
@@ -2489,12 +2489,12 @@ echo ccglm: key saved to %TOKENFILE% (current-user only).
 :run
 set "ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic"
 set "ANTHROPIC_AUTH_TOKEN=%token%"
-set "ANTHROPIC_MODEL=glm-5.3"
-set "ANTHROPIC_DEFAULT_OPUS_MODEL=glm-5.3"
-set "ANTHROPIC_DEFAULT_SONNET_MODEL=glm-4.6"
-set "ANTHROPIC_DEFAULT_HAIKU_MODEL=glm-4.5-air"
-set "ANTHROPIC_DEFAULT_FABLE_MODEL=glm-4.7-flashx"
-set "CLAUDE_CODE_SUBAGENT_MODEL=glm-5.3"
+set "ANTHROPIC_MODEL=glm-5.3[1m]"
+set "ANTHROPIC_DEFAULT_OPUS_MODEL=glm-5.3[1m]"
+set "ANTHROPIC_DEFAULT_SONNET_MODEL=glm-5.3-flash[1m]"
+set "ANTHROPIC_DEFAULT_HAIKU_MODEL=glm-5.3-flash[1m]"
+set "ANTHROPIC_DEFAULT_FABLE_MODEL=glm-5.3-flashx[1m]"
+set "CLAUDE_CODE_SUBAGENT_MODEL=glm-5.3[1m]"
 set "CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000"
 set "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
 set "API_TIMEOUT_MS=3000000"
@@ -2610,27 +2610,27 @@ set "current="
 if exist "%MODELFILE%" set /p current=<"%MODELFILE%"
 echo ccort-model - pick a model:
 if "%current%"=="stealth/ox-alpha[1m]" (echo    1. stealth/ox-alpha[1m]   [current]) else (echo    1. stealth/ox-alpha[1m])
-if "%current%"=="anthropic/claude-opus-4.8[1m]" (echo    2. anthropic/claude-opus-4.8[1m]   [current]) else (echo    2. anthropic/claude-opus-4.8[1m])
-if "%current%"=="anthropic/claude-sonnet-5[1m]" (echo    3. anthropic/claude-sonnet-5[1m]   [current]) else (echo    3. anthropic/claude-sonnet-5[1m])
-if "%current%"=="anthropic/claude-haiku-4.5" (echo    4. anthropic/claude-haiku-4.5   [current]) else (echo    4. anthropic/claude-haiku-4.5)
+if "%current%"=="anthropic/claude-opus-5.5[1m]" (echo    2. anthropic/claude-opus-5.5[1m]   [current]) else (echo    2. anthropic/claude-opus-5.5[1m])
+if "%current%"=="anthropic/claude-sonnet-5.5[1m]" (echo    3. anthropic/claude-sonnet-5.5[1m]   [current]) else (echo    3. anthropic/claude-sonnet-5.5[1m])
+if "%current%"=="anthropic/claude-haiku-5.5[1m]" (echo    4. anthropic/claude-haiku-5.5[1m]   [current]) else (echo    4. anthropic/claude-haiku-5.5[1m])
 if "%current%"=="x-ai/grok-4.20[1m]" (echo    5. x-ai/grok-4.20[1m]   [current]) else (echo    5. x-ai/grok-4.20[1m])
 if "%current%"=="openai/gpt-5.6-sol[1m]" (echo    6. openai/gpt-5.6-sol[1m]   [current]) else (echo    6. openai/gpt-5.6-sol[1m])
 if "%current%"=="google/gemini-3.1-pro-preview[1m]" (echo    7. google/gemini-3.1-pro-preview[1m]   [current]) else (echo    7. google/gemini-3.1-pro-preview[1m])
 if "%current%"=="deepseek/deepseek-v4-pro[1m]" (echo    8. deepseek/deepseek-v4-pro[1m]   [current]) else (echo    8. deepseek/deepseek-v4-pro[1m])
-if "%current%"=="moonshotai/kimi-k3[1m]" (echo    9. moonshotai/kimi-k3[1m]   [current]) else (echo    9. moonshotai/kimi-k3[1m])
-if "%current%"=="z-ai/glm-5" (echo    10. z-ai/glm-5   [current]) else (echo    10. z-ai/glm-5)
+if "%current%"=="moonshotai/kimi-k3.1-pro[1m]" (echo    9. moonshotai/kimi-k3.1-pro[1m]   [current]) else (echo    9. moonshotai/kimi-k3.1-pro[1m])
+if "%current%"=="z-ai/glm-5.3[1m]" (echo    10. z-ai/glm-5.3[1m]   [current]) else (echo    10. z-ai/glm-5.3[1m])
 echo     0. type a different id by hand
 set /p pick=choice [1-10, 0]: 
 if "%pick%"=="1" set "chosen=stealth/ox-alpha[1m]"
-if "%pick%"=="2" set "chosen=anthropic/claude-opus-4.8[1m]"
-if "%pick%"=="3" set "chosen=anthropic/claude-sonnet-5[1m]"
-if "%pick%"=="4" set "chosen=anthropic/claude-haiku-4.5"
+if "%pick%"=="2" set "chosen=anthropic/claude-opus-5.5[1m]"
+if "%pick%"=="3" set "chosen=anthropic/claude-sonnet-5.5[1m]"
+if "%pick%"=="4" set "chosen=anthropic/claude-haiku-5.5[1m]"
 if "%pick%"=="5" set "chosen=x-ai/grok-4.20[1m]"
 if "%pick%"=="6" set "chosen=openai/gpt-5.6-sol[1m]"
 if "%pick%"=="7" set "chosen=google/gemini-3.1-pro-preview[1m]"
 if "%pick%"=="8" set "chosen=deepseek/deepseek-v4-pro[1m]"
-if "%pick%"=="9" set "chosen=moonshotai/kimi-k3[1m]"
-if "%pick%"=="10" set "chosen=z-ai/glm-5"
+if "%pick%"=="9" set "chosen=moonshotai/kimi-k3.1-pro[1m]"
+if "%pick%"=="10" set "chosen=z-ai/glm-5.3[1m]"
 if "%pick%"=="0" set /p chosen=model id: 
 :save
 if "%chosen%"=="" (
