@@ -173,7 +173,8 @@ Every entry is a **two-way toggle**. In the submenu, **SPACE** cycles each row `
 | NumLock | On at the logon screen **and** after sign-in | Off |
 | PrintScreen key | Unbind it from the Windows screen-clip overlay (`PrintScreenKeyForSnippingEnabled=0` + Explorer restart) so the key falls through to ShareX etc. — restart that app afterwards so it can claim the key | Rebind it to the overlay |
 | Superfetch / Prefetch | Stop + disable `SysMain`, `EnablePrefetcher=0`, clear the Prefetch cache | Re-enable (`start=auto`, `EnablePrefetcher=3`) |
-| Windows Photo Viewer | Re-register it for `.tif .tiff .png .bmp .jpeg .jpg .ico` | Unregister |
+| Windows Photo Viewer | Remove the Store **Photos** app, then re-register the classic viewer for `.tif .tiff .png .bmp .jpeg .jpg .ico` — including the `Applications\photoviewer.dll` open verb + `DropTarget` that Windows itself no longer writes, so it actually shows up under *Open with* and the next/previous arrows browse the folder | Unregister (Photos is **not** reinstalled) |
+| Classic Notepad | Remove the Store **Notepad** app, give `txtfilelegacy` a real open verb (it ships with `printto` only), point `.txt` at it and restore `.txt\ShellNew` — which is the one key that brings **right-click → New → Text Document** back. Also drops the hash-signed `.txt` `UserChoice`, which a removed Store Notepad leaves pointing at a dead ProgId | Unregister (Notepad is **not** reinstalled) |
 | Rebuild icon cache | One-shot: `ie4uinit -show`, drop `IconCache.db`, restart Explorer | — |
 | Flush DNS | One-shot: `ipconfig /flushdns` + `/release` + `/renew` | — |
 
@@ -195,7 +196,7 @@ Remove pre-installed Windows apps and (optionally) the dev tools/browsers this s
   - **System Restore** → *(disable + delete all restore points)*: `Disable-ComputerRestore` + `vssadmin delete shadows /all` + a `DisableSR` policy. ⚠️ Deleted restore points are unrecoverable. (Re-enable with the **Enable System Restore** tweak.)
   - **Microsoft Edge** → the [`ShadowWhisperer/Remove-MS-Edge`](https://github.com/ShadowWhisperer/Remove-MS-Edge) removal **logic ported natively** (uninstall + AppX + update services/tasks + registry + System32 stubs), using the system's own `setup.exe` so nothing is downloaded. **WebView2 is deliberately kept** (many apps need it). To put things back, use the `Install: Microsoft Edge` / `Install: Edge WebView2 Runtime` tweaks.
 - **UWP bloat:** Xbox app / Game Bar / Game Speech / Xbox Live / Xbox Identity Provider, Get Help, Tips, Feedback Hub, Maps, Weather, News, Solitaire Collection, Groove Music, Movies & TV, People, Phone Link, Clipchamp, consumer Teams, Copilot, Quick Assist
-- **More modern apps:** Dev Home, Microsoft 365 / Office, Bing Search, Sticky Notes, Teams (new), To Do, Outlook for Windows, Paint, Power Automate, LinkedIn, Photos, Clock, Calculator, Sound Recorder, Camera, Mobile devices (Cross Device), Widgets Platform Runtime, Web Experience Pack, Snipping Tool, Start Experiences App, Store Purchase App
+- **More modern apps:** Dev Home, Microsoft 365 / Office, Bing Search, Sticky Notes, Teams (new), To Do, Outlook for Windows, Paint, Power Automate, LinkedIn, Photos, Notepad, Clock, Calculator, Sound Recorder, Camera, Mobile devices (Cross Device), Widgets Platform Runtime, Web Experience Pack, Snipping Tool, Start Experiences App, Store Purchase App
 - **Media/image codec extensions:** VP9 / HEVC / HEIF / WebP / AV1 / … (⚠️ removing these can break video/image playback)
 - **Media Features:** disable the `WindowsMediaPlayer` optional feature (Windows Media Player Legacy)
 - **Dev tools / browsers:** Chrome, Node.js, Docker, VS Code, DBeaver, Postman, FileZilla, GitHub CLI, cloudflared

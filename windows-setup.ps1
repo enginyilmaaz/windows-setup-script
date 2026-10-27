@@ -24,9 +24,9 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.9.16'
-$script:SCRIPT_REVISION = '68'
-$script:SCRIPT_DATE     = '2026-10-25'
+$script:SCRIPT_VERSION  = '1.9.17'
+$script:SCRIPT_REVISION = '69'
+$script:SCRIPT_DATE     = '2026-10-27'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
 $script:SELF_URL = 'https://bit.ly/windows-ey'
@@ -685,6 +685,7 @@ $script:UiTweaks = @(
     @{ Key='printscreen-snip';   Label='PrintScreen: unbind the screen-clip overlay';  Apply='Disable-PrintScreenSnip';      Revert='Enable-PrintScreenSnip' }
     @{ Key='superfetch';         Label='Disable Superfetch (SysMain) + Prefetch';      Apply='Disable-SuperfetchPrefetch';   Revert='Enable-SuperfetchPrefetch' }
     @{ Key='photo-viewer';       Label='Restore the classic Windows Photo Viewer';     Apply='Restore-WindowsPhotoViewer';   Revert='Remove-WindowsPhotoViewer' }
+    @{ Key='classic-notepad';    Label='Classic Notepad + New > Text Document';        Apply='Restore-ClassicNotepad';       Revert='Remove-ClassicNotepad' }
     @{ Key='icon-cache';         Label='Rebuild the icon cache (one-shot)';            Apply='Reset-IconCache';              Revert=$null }
     @{ Key='dns-flush';          Label='Flush DNS + renew the IP lease (one-shot)';    Apply='Clear-DnsCache';               Revert=$null }
 )
@@ -2040,6 +2041,9 @@ $script:TWEAK_REG_KEYS = @(
     'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace',              # This PC folders / 3D Objects
     'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\DelegateFolders', # nav pane: removable drives
     'HKLM\SOFTWARE\Microsoft\Windows Photo Viewer\Capabilities\FileAssociations',                # classic Photo Viewer
+    'HKLM\SOFTWARE\Classes\Applications\photoviewer.dll',                                        # classic Photo Viewer "Open with" verb
+    'HKLM\SOFTWARE\Classes\.txt',                                                                # .txt class + New > Text Document
+    'HKLM\SOFTWARE\Classes\txtfilelegacy',                                                       # classic notepad.exe open verb
     'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters',# prefetch
     'HKCU\Control Panel\Keyboard',                                      # NumLock (user) + PrintScreen key binding
     'HKU\.DEFAULT\Control Panel\Keyboard'                               # NumLock at the logon screen
@@ -4174,13 +4178,35 @@ function Enable-SuperfetchPrefetch {
 #-------------------------------------------------------------------------------
 $script:PHOTOVIEWER_KEY = 'HKLM\SOFTWARE\Microsoft\Windows Photo Viewer\Capabilities\FileAssociations'
 $script:PHOTOVIEWER_EXT = @('.tif', '.tiff', '.png', '.bmp', '.jpeg', '.jpg', '.ico')
+$script:PHOTOVIEWER_APP = 'HKLM\SOFTWARE\Classes\Applications\photoviewer.dll'
+$script:PHOTOVIEWER_DLL = "$env:ProgramFiles\Windows Photo Viewer\PhotoViewer.dll"
+$script:PHOTOVIEWER_CMD = "$env:SystemRoot\System32\rundll32.exe `"$env:ProgramFiles\Windows Photo Viewer\PhotoViewer.dll`", ImageView_Fullscreen %1"
 
 function Restore-WindowsPhotoViewer {
+    if (-not (Test-Path -LiteralPath $script:PHOTOVIEWER_DLL)) {
+        Write-LogWarning "PhotoViewer.dll is not on this machine - nothing to register."
+        return $false
+    }
     Write-LogInfo "Re-registering the classic Windows Photo Viewer for common image types..."
+    # The Store Photos app shadows the viewer in "Open with" - drop it first.
+    # Already-gone is a silent no-op, so this stays idempotent.
+    Remove-BloatItem -Item @{ Key='photos'; Label='Photos (Store app)'; Kind='Appx'; Id='Microsoft.Windows.Photos'; ProvisionedToo=$true } | Out-Null
+
     $ok = $true
     foreach ($ext in $script:PHOTOVIEWER_EXT) {
         if (-not (Set-UiRegValue -RegPath $script:PHOTOVIEWER_KEY -Name $ext -Value 'PhotoViewer.FileAssoc.Tiff' -Type String)) { $ok = $false }
     }
+    # Win10/11 ship the DLL but NOT this verb, so the viewer never shows up under
+    # "Open with > Choose another app" and the capabilities above stay unreachable.
+    # DropTarget is what lets it take multiple files and browse the folder with
+    # the next/previous arrows; without it only the one clicked file opens.
+    if (-not (New-UiRegKey -RegPath "$script:PHOTOVIEWER_APP\shell\open")) { $ok = $false }
+    # MuiVerb needs the DLL's full path - a bare "photoviewer.dll" does not
+    # resolve (the DLL is not in System32), which leaves the verb unlabelled.
+    if (-not (Set-UiRegValue -RegPath "$script:PHOTOVIEWER_APP\shell\open" -Name 'MuiVerb' -Value "@$script:PHOTOVIEWER_DLL,-3043" -Type String)) { $ok = $false }
+    if (-not (New-UiRegKey -RegPath "$script:PHOTOVIEWER_APP\shell\open\command" -DefaultValue $script:PHOTOVIEWER_CMD)) { $ok = $false }
+    if (-not (Set-UiRegValue -RegPath "$script:PHOTOVIEWER_APP\shell\open\DropTarget" -Name 'Clsid' -Value '{FFE2A43C-56B9-4bf5-9A79-CC6D4285608A}' -Type String)) { $ok = $false }
+
     if ($ok) {
         Write-LogSuccess "Windows Photo Viewer registered for: $($script:PHOTOVIEWER_EXT -join ', ')"
         Write-LogInfo "It now appears under right-click > Open with; pick it once per file type (or in Settings > Default apps)."
@@ -4192,7 +4218,100 @@ function Remove-WindowsPhotoViewer {
     foreach ($ext in $script:PHOTOVIEWER_EXT) {
         Remove-UiRegValue -RegPath $script:PHOTOVIEWER_KEY -Name $ext | Out-Null
     }
+    Remove-UiRegKey -TweakKey 'photo-viewer' -RegPath $script:PHOTOVIEWER_APP | Out-Null
     Write-LogSuccess "Windows Photo Viewer file associations removed."
+    Write-LogInfo "The Store Photos app is not reinstalled automatically - get it from the Microsoft Store if you want it back."
+    return $true
+}
+
+#-------------------------------------------------------------------------------
+# Classic Notepad (notepad.exe) instead of the Store "Windows Notepad"
+#-------------------------------------------------------------------------------
+$script:NOTEPAD_EXE        = "$env:SystemRoot\system32\notepad.exe"
+$script:NOTEPAD_EXT_KEY    = 'HKLM\SOFTWARE\Classes\.txt'
+$script:NOTEPAD_CLASS_KEY  = 'HKLM\SOFTWARE\Classes\txtfilelegacy'
+$script:NOTEPAD_USERCHOICE = 'HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.txt\UserChoice'
+
+# Windows guards <ext>\UserChoice with an explicit DENY ACE so that nothing can
+# hijack a file association behind the user's back - an elevated `reg delete`
+# fails on it too. Strip the deny rules first, then drop the key. Exports it the
+# same way Remove-UiRegKey does, so a revert still has something to re-import.
+function Remove-TxtUserChoice {
+    $parentPath = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.txt'
+    try {
+        $parent = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($parentPath, $true)
+        if (-not $parent) { return $true }
+        if ($parent.GetSubKeyNames() -notcontains 'UserChoice') { $parent.Close(); return $true }
+
+        $dir = Join-Path $script:UI_TWEAK_BACKUP_ROOT 'classic-notepad'
+        if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        & reg.exe export $script:NOTEPAD_USERCHOICE (Join-Path $dir 'txt_UserChoice.reg') /y > $null 2>&1
+
+        $rights = [System.Security.AccessControl.RegistryRights]'ChangePermissions, ReadPermissions'
+        $uc = $parent.OpenSubKey('UserChoice', [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree, $rights)
+        $acl = $uc.GetAccessControl()
+        foreach ($rule in @($acl.GetAccessRules($true, $false, [System.Security.Principal.NTAccount]))) {
+            if ($rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Deny) {
+                [void]$acl.RemoveAccessRuleSpecific($rule)
+            }
+        }
+        $uc.SetAccessControl($acl)
+        $uc.Close()
+
+        $parent.DeleteSubKeyTree('UserChoice')
+        $parent.Close()
+        Write-LogInfo "  Cleared the protected .txt UserChoice."
+        return $true
+    } catch {
+        Write-LogWarning "Could not clear the .txt UserChoice: $($_.Exception.Message)"
+        Write-LogInfo "  Set it by hand once: Settings > Apps > Default apps > .txt > Notepad."
+        return $false
+    }
+}
+
+function Restore-ClassicNotepad {
+    if (-not (Test-Path -LiteralPath $script:NOTEPAD_EXE)) {
+        Write-LogWarning "notepad.exe is missing from System32 - nothing to register."
+        return $false
+    }
+    Write-LogInfo "Pointing .txt back at the classic notepad.exe..."
+    # The Store Notepad owns the .txt class AND its ShellNew entry, so removing
+    # the package is what makes "New > Text Document" vanish from the right-click
+    # menu. Dropping it here keeps it from re-claiming the association later.
+    Remove-BloatItem -Item @{ Key='notepad'; Label='Notepad (Store app)'; Kind='Appx'; Id='Microsoft.WindowsNotepad'; ProvisionedToo=$true } | Out-Null
+
+    $ok = $true
+    # txtfilelegacy ships with a "printto" verb only - it needs a real open verb.
+    if (-not (New-UiRegKey -RegPath $script:NOTEPAD_CLASS_KEY -DefaultValue 'Text Document')) { $ok = $false }
+    if (-not (New-UiRegKey -RegPath "$script:NOTEPAD_CLASS_KEY\DefaultIcon" -DefaultValue "$script:NOTEPAD_EXE,0")) { $ok = $false }
+    if (-not (New-UiRegKey -RegPath "$script:NOTEPAD_CLASS_KEY\shell\open\command" -DefaultValue "`"$script:NOTEPAD_EXE`" `"%1`"")) { $ok = $false }
+    if (-not (New-UiRegKey -RegPath $script:NOTEPAD_EXT_KEY -DefaultValue 'txtfilelegacy')) { $ok = $false }
+
+    # right-click > New > Text Document comes solely from this key.
+    if (-not (Set-UiRegValue -RegPath "$script:NOTEPAD_EXT_KEY\ShellNew" -Name 'NullFile' -Value '' -Type String)) { $ok = $false }
+    if (-not (Set-UiRegValue -RegPath "$script:NOTEPAD_EXT_KEY\ShellNew" -Name 'ItemName' -Value "@$script:NOTEPAD_EXE,-470" -Type String)) { $ok = $false }
+
+    # UserChoice outranks the class above and is hash-signed, so it cannot be
+    # rewritten - only dropped, which makes Explorer fall back to the class. A
+    # removed Store Notepad leaves a UserChoice pointing at a dead ProgId, which
+    # is why double-clicking a .txt does nothing until this is cleared. Not fatal:
+    # New > Text Document comes from ShellNew and works either way.
+    Remove-TxtUserChoice | Out-Null
+
+    if ($ok) {
+        Write-LogSuccess "Classic notepad.exe handles .txt again; 'New > Text Document' is back."
+        Restart-Explorer
+    }
+    return $ok
+}
+function Remove-ClassicNotepad {
+    Write-LogInfo "Unregistering the classic notepad.exe handler for .txt..."
+    Remove-UiRegValue -RegPath "$script:NOTEPAD_EXT_KEY\ShellNew" -Name 'NullFile' | Out-Null
+    Remove-UiRegValue -RegPath "$script:NOTEPAD_EXT_KEY\ShellNew" -Name 'ItemName' | Out-Null
+    Remove-UiRegKey -TweakKey 'classic-notepad' -RegPath "$script:NOTEPAD_CLASS_KEY\shell\open" | Out-Null
+    Restart-Explorer
+    Write-LogSuccess "Classic notepad.exe registration removed."
+    Write-LogInfo "The Store Notepad is not reinstalled automatically - get it from the Microsoft Store if you want it back."
     return $true
 }
 
@@ -4327,6 +4446,11 @@ function Test-UiTweakApplied {
                 $v = Get-UiRegValue -RegPath $script:PHOTOVIEWER_KEY -Name '.png'
                 return ([string]$v -eq 'PhotoViewer.FileAssoc.Tiff')
             }
+            'classic-notepad' {
+                # ShellNew\ItemName is the part that brings New > Text Document back.
+                $v = Get-UiRegValue -RegPath "$script:NOTEPAD_EXT_KEY\ShellNew" -Name 'ItemName'
+                return ([string]$v -like '*notepad.exe*')
+            }
             default { return $false }
         }
     } catch {
@@ -4387,6 +4511,7 @@ $script:DebloatItems = @(
     @{ Key='powerautomate'; Label='Power Automate (Desktop)';  Kind='Appx'; Id='Microsoft.PowerAutomateDesktop';    ProvisionedToo=$true }
     @{ Key='linkedin';      Label='LinkedIn';                  Kind='Appx'; Id='*LinkedIn*';                        ProvisionedToo=$true }
     @{ Key='photos';        Label='Photos';                    Kind='Appx'; Id='Microsoft.Windows.Photos';          ProvisionedToo=$true }
+    @{ Key='notepad';       Label='Notepad (Store app)';       Kind='Appx'; Id='Microsoft.WindowsNotepad';          ProvisionedToo=$true }
     @{ Key='clock';         Label='Clock (Alarms & Clock)';    Kind='Appx'; Id='Microsoft.WindowsAlarms';           ProvisionedToo=$true }
     @{ Key='calculator';    Label='Calculator';                Kind='Appx'; Id='Microsoft.WindowsCalculator';       ProvisionedToo=$true }
     @{ Key='soundrecorder'; Label='Sound Recorder';            Kind='Appx'; Id='Microsoft.WindowsSoundRecorder';    ProvisionedToo=$true }
