@@ -119,6 +119,7 @@ Everything below is reachable through the interactive menu (`--menu`) or directl
 | Taskbar Tweaks | Taskbar alignment/size adjustments |
 | Taskbar/Start: align left | Move the Start button + taskbar icons to the left (`TaskbarAl=0`) |
 | Taskbar: show labels | Never combine taskbar buttons so window labels stay visible (`TaskbarGlomLevel=2`) — the native core of Windhawk's *taskbar-labels* mod |
+| Taskbar: remove the Task View button | Hide the Task View (virtual-desktop switcher) button; the desktops stay and Win+Tab still opens them (`ShowTaskViewButton=0`) |
 | Taskbar Search: icon only | Show the taskbar search as a compact icon (`SearchboxTaskbarMode=1`) |
 | Disable Windows Search | Stop + disable the `WSearch` indexer service |
 | Disable Windows Updates | Set the `NoAutoUpdate` policy and disable the update services (⚠️ stops security patches) |

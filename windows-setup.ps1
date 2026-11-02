@@ -24,9 +24,9 @@
 # Description: Automates Windows post-installation setup with modular options
 #===============================================================================
 
-$script:SCRIPT_VERSION  = '1.9.17'
-$script:SCRIPT_REVISION = '69'
-$script:SCRIPT_DATE     = '2026-10-27'
+$script:SCRIPT_VERSION  = '1.9.18'
+$script:SCRIPT_REVISION = '70'
+$script:SCRIPT_DATE     = '2026-10-30'
 
 # Canonical self URL (used to re-fetch when re-launching elevated under `irm | iex`)
 $script:SELF_URL = 'https://bit.ly/windows-ey'
@@ -640,6 +640,7 @@ $script:WindowsTweaks = @(
     @{ Key='taskbar';          Label='Taskbar Tweaks';                       Apply='Set-TaskbarTweaks' }
     @{ Key='taskbar-left';     Label='Taskbar/Start: align left';            Apply='Set-TaskbarAlignLeft' }
     @{ Key='taskbar-labels';   Label='Taskbar: show labels (never combine)'; Apply='Set-TaskbarLabels' }
+    @{ Key='taskview-button';  Label='Taskbar: remove the Task View button'; Apply='Hide-TaskViewButton' }
     @{ Key='search-icon';      Label='Taskbar Search: icon only';            Apply='Set-SearchBoxIcon' }
     @{ Key='disable-search';   Label='Disable Windows Search (WSearch service)'; Apply='Disable-WindowsSearchService' }
     @{ Key='disable-updates';  Label='Disable Windows Updates';              Apply='Disable-WindowsUpdates' }
@@ -1525,6 +1526,70 @@ function Update-AiCliSessionPath {
 }
 
 #-------------------------------------------------------------------------------
+# Private helper: broadcast WM_SETTINGCHANGE("Environment") so processes started
+# AFTER a PATH change inherit it without a logoff. Explorer hands a cached copy
+# of the environment to every child it launches, so without this broadcast the
+# usual "open a new terminal" advice still hands back the stale PATH.
+#-------------------------------------------------------------------------------
+function Send-EnvironmentChange {
+    try {
+        if (-not ('WsEnv.Native' -as [type])) {
+            $sig = '[DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]' +
+                   ' public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg,' +
+                   ' IntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out IntPtr lpdwResult);'
+            Add-Type -Namespace WsEnv -Name Native -MemberDefinition $sig
+        }
+        $res = [IntPtr]::Zero
+        # HWND_BROADCAST = 0xFFFF, WM_SETTINGCHANGE = 0x1A, SMTO_ABORTIFHUNG = 0x2
+        [void][WsEnv.Native]::SendMessageTimeout([IntPtr]0xFFFF, 0x1A, [IntPtr]::Zero, 'Environment', 0x2, 5000, [ref]$res)
+    } catch { }
+}
+
+#-------------------------------------------------------------------------------
+# Private helper: persist $Directory into the User PATH, idempotently, and put it
+# on the running session's PATH too so a just-installed tool resolves in the same
+# run. Returns $true unless the registry write itself failed.
+#
+# Deliberately NOT [Environment]::SetEnvironmentVariable('Path', ..., 'User'):
+# that API reads the EXPANDED value and writes it back as REG_SZ, so a PATH that
+# holds %LOCALAPPDATA%\... loses the placeholder and stops expanding. setx is no
+# better - it also drops to REG_SZ once the value has 2+ '%' and truncates at
+# 1024 chars. So the raw value is read off HKCU\Environment with expansion
+# disabled, the entry appended, and the value written back in its original kind.
+#-------------------------------------------------------------------------------
+function Add-ToUserPath {
+    param([Parameter(Mandatory = $true)][string]$Directory)
+    try {
+        $key  = 'HKCU:\Environment'
+        $item = Get-Item -LiteralPath $key -ErrorAction SilentlyContinue
+        $raw  = ''
+        $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString
+        if ($item) {
+            $noExpand = [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
+            $raw = [string]$item.GetValue('Path', '', $noExpand)
+            if ($item.GetValueNames() -contains 'Path') { $kind = $item.GetValueKind('Path') }
+        }
+        # Compare EXPANDED entries: the directory may already be there as %VAR%\...
+        $target  = $Directory.TrimEnd('\')
+        $present = @($raw -split ';' | Where-Object { $_ } |
+                     ForEach-Object { [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\') })
+        if ($present -notcontains $target) {
+            $trimmed = $raw.TrimEnd(';')
+            $newPath = if ($trimmed) { $trimmed + ';' + $Directory } else { $Directory }
+            Set-ItemProperty -LiteralPath $key -Name 'Path' -Value $newPath -Type $kind
+            Send-EnvironmentChange
+            Write-LogInfo "Added to the User PATH: $Directory"
+        }
+        $session = @([string]$env:Path -split ';' | Where-Object { $_ } | ForEach-Object { $_.TrimEnd('\') })
+        if ($session -notcontains $target) { $env:Path = ([string]$env:Path).TrimEnd(';') + ';' + $Directory }
+        return $true
+    } catch {
+        Write-LogWarning "Could not add '$Directory' to the User PATH: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+#-------------------------------------------------------------------------------
 # Private helper: preconfigure OpenCode to default to z.ai GLM (no secret stored).
 # Writes $env:USERPROFILE\.config\opencode\opencode.json with the EXACT provider
 # block from the source. If a config already exists it is NOT clobbered:
@@ -1624,6 +1689,11 @@ function Install-Claude {
             } catch {
                 Write-LogWarning "Native Claude installer failed: $($_.Exception.Message)"
             }
+            # The native installer drops claude.exe in ~\.local\bin but does not always
+            # add that directory to the User PATH (it is skipped on some setups, see
+            # anthropics/claude-code#21365), which leaves 'claude' unresolvable in a new
+            # terminal. Add it here instead of trusting the installer to have done it.
+            Add-ToUserPath (Join-Path $env:USERPROFILE '.local\bin') | Out-Null
             Update-AiCliSessionPath
 
             # (2) npm fallback if the native installer did not put 'claude' on PATH.
@@ -1719,6 +1789,11 @@ function Install-Codex {
             if (-not (Test-Command 'npm')) { Install-NodeJs }
             npm install -g '@openai/codex'
             if ($LASTEXITCODE -ne 0) { throw 'npm install failed' }
+            # npm's global prefix (where it writes the codex shim) is not on PATH on
+            # every Node install, so persist it rather than relying on the shell.
+            $npmPrefix = (& npm prefix -g 2>$null | Select-Object -First 1)
+            if ($npmPrefix) { Add-ToUserPath ([string]$npmPrefix).Trim() | Out-Null }
+            Update-AiCliSessionPath
         }
 }
 function Test-CodexInstalled { Test-Command 'codex' }
@@ -2685,14 +2760,11 @@ echo echo More ids: https://openrouter.ai/models
         }
 
         # Add the aliases folder to the User PATH (persisted) + the current session.
-        $userPath = [Environment]::GetEnvironmentVariable('Path', 'User'); if (-not $userPath) { $userPath = '' }
-        if (($userPath -split ';') -notcontains $aliasDir) {
-            $trimmed = $userPath.TrimEnd(';')
-            $newPath = if ($trimmed) { $trimmed + ';' + $aliasDir } else { $aliasDir }
-            [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
-        }
-        $cur = [string]$env:Path
-        if (($cur -split ';') -notcontains $aliasDir) { $env:Path = ($cur.TrimEnd(';') + ';' + $aliasDir).TrimStart(';') }
+        Add-ToUserPath $aliasDir | Out-Null
+        # Every alias shells out to 'claude', so the native Claude install dir has to
+        # be on PATH as well or ccskip/cxskip resolve to nothing in a fresh terminal.
+        $claudeBin = Join-Path $env:USERPROFILE '.local\bin'
+        if (Test-Path -LiteralPath $claudeBin) { Add-ToUserPath $claudeBin | Out-Null }
 
         $installed = @($cmds.Keys | Where-Object { $install[$_] })
         Write-LogSuccess ("CLI aliases (.cmd) installed to $aliasDir and added to PATH: {0} (open a new terminal to use them)." -f ($installed -join ', '))
@@ -2958,6 +3030,24 @@ function Set-TaskbarLabels {
         return $true
     } catch {
         Write-LogWarning "Could not apply taskbar labels: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+# Taskbar: remove the Task View button (ShowTaskViewButton: 0=hidden, 1=shown).
+# Only the button goes: the virtual desktops themselves stay and Win+Tab still
+# opens the switcher.
+function Hide-TaskViewButton {
+    Write-LogInfo "Removing the Task View button from the taskbar..."
+    $adv = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
+    try {
+        if (-not (Test-Path -LiteralPath $adv)) { New-Item -Path $adv -Force | Out-Null }
+        New-ItemProperty -LiteralPath $adv -Name 'ShowTaskViewButton' -Value 0 -PropertyType DWord -Force | Out-Null
+        Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+        Write-LogSuccess "Task View button removed (Explorer restarted)."
+        return $true
+    } catch {
+        Write-LogWarning "Could not remove the Task View button: $($_.Exception.Message)"
         return $false
     }
 }
@@ -3392,6 +3482,10 @@ function Test-TweakApplied {
             'taskbar-labels' {
                 $v = (Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'TaskbarGlomLevel' -ErrorAction SilentlyContinue).TaskbarGlomLevel
                 return ($v -eq 2)
+            }
+            'taskview-button' {
+                $v = (Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'ShowTaskViewButton' -ErrorAction SilentlyContinue).ShowTaskViewButton
+                return ($v -eq 0)
             }
             'search-icon' {
                 $v = (Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Search' -Name 'SearchboxTaskbarMode' -ErrorAction SilentlyContinue).SearchboxTaskbarMode
